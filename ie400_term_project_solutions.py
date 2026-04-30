@@ -41,7 +41,6 @@ VALID = frozenset(
     if (r, c) not in OBSTACLES
 )
 
-# Camera visibility lookup tables (from given movement tables)
 _C1 = {
     0: frozenset({(3, 3), (3, 4), (3, 5)}),
     1: frozenset({(3, 4), (3, 5), (3, 6)}),
@@ -81,7 +80,6 @@ def nbrs(r, c):
     ]
 
 
-# Time-expanded BFS
 def bfs_shortest(extra_block=None, forced_at=None):
     """
     BFS on the time-expanded graph.
@@ -126,7 +124,6 @@ def bfs_shortest(extra_block=None, forced_at=None):
     return None, None
 
 
-# IP solver (fixed horizon)
 def solve_ip(task_name, T, extra_fn=None):
     """
     Build and solve the museum IP with fixed horizon T.
@@ -145,30 +142,25 @@ def solve_ip(task_name, T, extra_fn=None):
         for (r, c) in VALID
     }
 
-    # Start
     m.addConstr(x[0, START[0], START[1]] == 1)
     for (r, c) in VALID:
         if (r, c) != START:
             m.addConstr(x[0, r, c] == 0)
 
-    # One cell per step
     for t in range(T + 1):
         m.addConstr(gp.quicksum(x[t, r, c] for (r, c) in VALID) == 1)
 
-    # Movement
     for t in range(T):
         for (r, c) in VALID:
             m.addConstr(
                 x[t + 1, r, c] <= gp.quicksum(x[t, nr, nc] for (nr, nc) in nbrs(r, c))
             )
 
-    # Camera blocking
     for t in range(T + 1):
         for (r, c) in cam_vis(t):
             if (r, c) in VALID and (r, c) != EXIT:
                 m.addConstr(x[t, r, c] == 0)
 
-    # Must reach exit by T
     m.addConstr(x[T, EXIT[0], EXIT[1]] == 1)
 
     if extra_fn:
@@ -237,14 +229,12 @@ print("\n" + "=" * 60)
 print("  QUESTION 1 - MUSEUM ESCAPE")
 print("=" * 60)
 
-# Task 2: Base Case
 T2, _ = bfs_shortest()
 print(f"\n  [BFS] Base optimal T = {T2}")
 opt_T2, ip_path2 = solve_ip("Task2", T2)
 print_result("Task 2 - Base Case", opt_T2, ip_path2)
 validate("Task2", ip_path2)
 
-# Task 3: Booby Trap
 TRAP = (5, 1)
 FORB3 = (8, 3)
 
@@ -275,7 +265,6 @@ if opt_T3 is None:
 print_result("Task 3 - Booby Trap [(5,1) -> never (8,3)]", opt_T3, ip_path3)
 validate("Task3", ip_path3)
 
-# Task 4: Exit Lock Until t >= 18
 LOCKED4 = {(6, 7), (7, 6), (7, 7), (8, 6), (6, 8)}
 
 
@@ -300,7 +289,6 @@ else:
 print_result("Task 4 - Exit Lock (forbidden before t=18)", opt_T4, ip_path4)
 validate("Task4", ip_path4)
 
-# Task 5: Ghost Checkpoint (4,4) at t=3
 GHOST = (4, 4)
 GHOST_T = 3
 
@@ -354,11 +342,9 @@ print("=" * 60)
 
 MONTHS = list(range(1, 7))
 
-# Demand (million liters)
 DEM_W = {1: 9, 2: 9, 3: 14, 4: 12, 5: 12, 6: 13}
 DEM_CE = {1: 7, 2: 7, 3: 8, 4: 9, 5: 8, 6: 9}
 
-# Bottling rates -> liters/hour
 BOT_HRS = 720
 R_A_2L = 6_000 * 2
 R_A_1L = 10_000 * 1
@@ -383,23 +369,19 @@ DELTA = 10
 q2 = gp.Model("CCI")
 q2.setParam("OutputFlag", 0)
 
-# Variables (ML)
 pA1 = {m: q2.addVar(lb=0, name=f"pA1_{m}") for m in MONTHS}
 pA2 = {m: q2.addVar(lb=0, name=f"pA2_{m}") for m in MONTHS}
 pI1 = {m: q2.addVar(lb=0, name=f"pI1_{m}") for m in MONTHS}
 pI2 = {m: q2.addVar(lb=0, name=f"pI2_{m}") for m in MONTHS}
 
-# Supply routing
 sACE = {m: q2.addVar(lb=0, name=f"sACE_{m}") for m in MONTHS}
 sAW = {m: q2.addVar(lb=0, name=f"sAW_{m}") for m in MONTHS}
 sIW = {m: q2.addVar(lb=0, name=f"sIW_{m}") for m in MONTHS}
 sICE = {m: q2.addVar(lb=0, name=f"sICE_{m}") for m in MONTHS}
 
-# Inventory (ML, end of month)
 invA = {m: q2.addVar(lb=0, name=f"invA_{m}") for m in MONTHS}
 invI = {m: q2.addVar(lb=0, name=f"invI_{m}") for m in MONTHS}
 
-# Workforce
 wA = {m: q2.addVar(lb=0, vtype=GRB.INTEGER, name=f"wA_{m}") for m in MONTHS}
 wI = {m: q2.addVar(lb=0, vtype=GRB.INTEGER, name=f"wI_{m}") for m in MONTHS}
 hA = {m: q2.addVar(lb=0, vtype=GRB.INTEGER, name=f"hA_{m}") for m in MONTHS}
@@ -407,7 +389,6 @@ hI = {m: q2.addVar(lb=0, vtype=GRB.INTEGER, name=f"hI_{m}") for m in MONTHS}
 lA = {m: q2.addVar(lb=0, vtype=GRB.INTEGER, name=f"lA_{m}") for m in MONTHS}
 lI = {m: q2.addVar(lb=0, vtype=GRB.INTEGER, name=f"lI_{m}") for m in MONTHS}
 
-# MILP binaries for switching cost
 bA1 = {m: q2.addVar(vtype=GRB.BINARY, name=f"bA1_{m}") for m in MONTHS}
 bA2 = {m: q2.addVar(vtype=GRB.BINARY, name=f"bA2_{m}") for m in MONTHS}
 bI1 = {m: q2.addVar(vtype=GRB.BINARY, name=f"bI1_{m}") for m in MONTHS}
