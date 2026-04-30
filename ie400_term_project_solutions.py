@@ -5,7 +5,7 @@ Bilkent University, Department of Industrial Engineering
 Question 1: Museum Escape - IP solved with Gurobi
 Question 2: CCI Production Plan - LP/MILP solved with Gurobi
 
-Strategy for Q1 (to stay within Gurobi free-license limits):
+Strategy for Q1:
   We first compute T* (optimal steps) via time-expanded BFS that respects
   camera visibility. We then build a fixed-horizon IP at that T* to
   confirm/obtain the solution and enforce task-specific constraints.
