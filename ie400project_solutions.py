@@ -208,8 +208,7 @@ def solveMuseumIP(taskName, horizonT, addExtraConstraints=None, relaxedTransitio
 
 
 def printPath(label, optimalT, path):
-    separator = "=" * 60
-    print(f"\n{separator}\n  {label}\n{separator}")
+    print(f"\n  {label}\n")
     if optimalT is None:
         print("  *** INFEASIBLE – no solution found ***")
         return
@@ -254,9 +253,7 @@ def validatePath(label, path):
 
 
 
-print("\n" + "=" * 60)
 print("  QUESTION 1 – MUSEUM ESCAPE")
-print("=" * 60)
 
 baseOptimalT, _ = runTimedBFS()
 print(f"\n  [BFS] Base case optimal T = {baseOptimalT}")
@@ -379,9 +376,7 @@ if task5_path is not None:
         print("  OK [Task5] all non-teleport constraints satisfied.")
 
 
-print(f"\n{'-' * 60}")
 print("  Q1 Summary")
-print(f"{'-' * 60}")
 for taskLabel, result in [
     ("Task 2 - Base Case",    task2_T),
     ("Task 3 - Booby Trap",   task3_T),
@@ -393,10 +388,9 @@ for taskLabel, result in [
 
 
 #  QUESTION 2 – CCI PRODUCTION PLANNING
-
-print("\n\n" + "=" * 60)
-print("  QUESTION 2 – CCI PRODUCTION PLANNING  (volumes in liters)")
-print("=" * 60)
+print()
+print()
+print("  QUESTION 2 – CCI PRODUCTION PLANNING")
 
 MONTHS = list(range(1, 7))   # m = 1, ..., 6
 
@@ -623,86 +617,3 @@ cciModel.setObjective(
 )
 
 cciModel.optimize()
-
-
-print(f"\n{'-' * 60}")
-if cciModel.Status in (GRB.OPTIMAL, GRB.TIME_LIMIT) and cciModel.SolCount > 0:
-    print(f"  Optimal Total Cost : {cciModel.ObjVal:>15,.0f} TL\n")
-
-    # Workforce table
-    print(f"  {'m':<4} {'wA':>6} {'hA':>5} {'lA':>5} "
-          f"{'wI':>6} {'hI':>5} {'lI':>5} "
-          f"{'invA (L)':>12} {'invI (L)':>12} "
-          f"{'sAW (L)':>12} {'sICE (L)':>12}")
-    print(f"  {'-' * 88}")
-    for m in MONTHS:
-        print(
-            f"  {m:<4} {workers_ankara[m].X:>6.0f} "
-            f"{max(0, hired_ankara[m].X):>5.0f} "
-            f"{max(0, laidOff_ankara[m].X):>5.0f} "
-            f"{workers_istanbul[m].X:>6.0f} "
-            f"{max(0, hired_istanbul[m].X):>5.0f} "
-            f"{max(0, laidOff_istanbul[m].X):>5.0f} "
-            f"{inventory_ankara[m].X:>12,.0f} "
-            f"{inventory_istanbul[m].X:>12,.0f} "
-            f"{supply_ankara_to_western[m].X:>12,.0f} "
-            f"{supply_istanbul_to_centEast[m].X:>12,.0f}"
-        )
-
-    # Production table
-    print("\n  Production quantities (liters)")
-    print(f"  {'m':<4} {'p1L_A':>12} {'p2L_A':>12} {'p1L_I':>12} {'p2L_I':>12} "
-          f"{'swA':>5} {'swI':>5}")
-    print(f"  {'-' * 65}")
-    for m in MONTHS:
-        print(
-            f"  {m:<4} {prod1L_ankara[m].X:>12,.0f} {prod2L_ankara[m].X:>12,.0f} "
-            f"{prod1L_istanbul[m].X:>12,.0f} {prod2L_istanbul[m].X:>12,.0f} "
-            f"{int(round(switching_ankara[m].X)):>5} "
-            f"{int(round(switching_istanbul[m].X)):>5}"
-        )
-
-    # Cost breakdown
-    print("\n  Cost breakdown (TL)")
-    for componentName, costExpr in [
-        ("Inventory holding",      inventoryHoldingCost),
-        ("Cross-region transport", crossRegionTransportCost),
-        ("Wages",                  wageCost),
-        ("Hiring",                 hiringCost),
-        ("Layoffs",                layoffCost),
-        ("Bottling switching",     bottlingSwitchingCost),
-    ]:
-        print(f"    {componentName:<24} : {costExpr.getValue():>12,.0f}")
-    print(f"    {'-' * 40}")
-    print(f"    {'TOTAL':<24} : {cciModel.ObjVal:>12,.0f}")
-
-    print("\n  [Validation – Q2]")
-    allValid = True
-    for m in MONTHS:
-        ce_supplied = supply_ankara_to_centEast[m].X + supply_istanbul_to_centEast[m].X
-        w_supplied  = supply_istanbul_to_western[m].X + supply_ankara_to_western[m].X
-        if ce_supplied < demandCentEast[m] - 1e-3:
-            print(f"  FAIL M{m}: C&E demand not met ({ce_supplied:.0f} < {demandCentEast[m]:.0f})")
-            allValid = False
-        if w_supplied < demandWestern[m] - 1e-3:
-            print(f"  FAIL M{m}: Western demand not met ({w_supplied:.0f} < {demandWestern[m]:.0f})")
-            allValid = False
-        if supply_ankara_to_western[m].X > CROSS_SHIP_CAP_FRACTION * demandWestern[m] + 1e-3:
-            print(f"  FAIL M{m}: Ankara->Western cross-ship cap exceeded")
-            allValid = False
-        if supply_istanbul_to_centEast[m].X > CROSS_SHIP_CAP_FRACTION * demandCentEast[m] + 1e-3:
-            print(f"  FAIL M{m}: Istanbul->C&E cross-ship cap exceeded")
-            allValid = False
-    for m in range(1, 6):
-        if inventory_istanbul[m].X < SAFETY_STOCK_FRACTION * demandWestern[m + 1] - 1e-3:
-            print(f"  FAIL M{m}: Istanbul safety stock violated")
-            allValid = False
-        if inventory_ankara[m].X < SAFETY_STOCK_FRACTION * demandCentEast[m + 1] - 1e-3:
-            print(f"  FAIL M{m}: Ankara safety stock violated")
-            allValid = False
-    if allValid:
-        print("  OK All Q2 constraints satisfied.")
-else:
-    print(f"  Q2 model status: {cciModel.Status} - infeasible or time limit exceeded.")
-
-print("  All done.")

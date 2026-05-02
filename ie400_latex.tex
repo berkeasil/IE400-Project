@@ -40,7 +40,7 @@ $(1,3),\,(2,2),\,(2,5),\,(3,7),\,(4,2),\,(4,3),\,(5,5),\,(6,4),\,(7,1),\,(7,4),\
 
 \subsection*{Camera Movement Tables}
 
-\textbf{Camera 1} (period 4, horizontal patrol along row 3):
+\textbf{Camera 1}:
 
 \begin{center}
 \begin{tabular}{cccc}
@@ -56,7 +56,7 @@ $4+$ & \multicolumn{3}{l}{repeats from $t=0$} \\
 \end{tabular}
 \end{center}
 
-\textbf{Camera 2} (period 6, middle corridor):
+\textbf{Camera 2}:
 
 \begin{center}
 \begin{tabular}{cccc}
@@ -74,7 +74,7 @@ $6+$ & \multicolumn{3}{l}{repeats from $t=0$} \\
 \end{tabular}
 \end{center}
 
-\textbf{Camera 3} (period 4, exit area diagonal):
+\textbf{Camera 3}:
 
 \begin{center}
 \begin{tabular}{cccc}
@@ -117,11 +117,6 @@ $x_{t,r,c}=1$ if Lara occupies cell $(r,c)$ at time step $t$, and $0$ otherwise.
 \[
   \min\; T
 \]
-\textit{Solution strategy:} $T^*$ is first determined by a time-expanded BFS over the
-state space $\{(r,c,t)\}$. Since every move has unit cost, BFS guarantees the optimal
-horizon. The IP is then solved at $T=T^*$ with Gurobi as a feasibility problem (objective
-constant zero) to confirm the path and enforce additional task-specific constraints. This
-two-phase approach is equivalent to minimising $T$ directly.
 
 \textbf{Constraints}
 
@@ -168,7 +163,7 @@ Gurobi and all constraints (C1)--(C6) are verified to hold.
 \toprule
 $t$ & Cell & $t$ & Cell & $t$ & Cell \\
 \midrule
- 0 & $(1,1)$ &  5 & $(5,1)$ & 10 & $(8,4)$ \\
+ 0 & $(1,1)$ &  5 & $(5,2)$ & 10 & $(8,4)$ \\
  1 & $(2,1)$ &  6 & $(6,2)$ & 11 & $(8,5)$ \\
  2 & $(3,1)$ &  7 & $(7,2)$ & 12 & $(8,6)$ \\
  3 & $(4,1)$ &  8 & $(8,2)$ & 13 & $(8,7)$ \\
@@ -205,7 +200,7 @@ then forbid $(8,3)$. The solver finds an alternative route avoiding $(8,3)$ at t
 $t$ & Cell & $t$ & Cell & $t$ & Cell \\
 \midrule
  0 & $(1,1)$            &  6 & $(5,3)$ & 12 & $(5,7)$ \\
- 1 & $(2,1)$            &  7 & $(5,4)$ & 13 & $(6,7)$ \\
+ 1 & $(2,1)$            &  7 & $(5,4)$ & 13 & $(5,8)$ \\
  2 & $(3,1)$            &  8 & $(4,4)$ & 14 & $(6,8)$ \\
  3 & $(4,1)$            &  9 & $(4,5)$ & 15 & $(7,8)$ \\
  4 & $(5,1)$ \textit{[trap]} & 10 & $(4,6)$ & 16 & $(8,8)$ \\
@@ -233,14 +228,14 @@ is lifted.
 \toprule
 $t$ & Cell & $t$ & Cell & $t$ & Cell \\
 \midrule
- 0 & $(1,1)$ &  8 & $(5,1)$ & 16 & $(5,7)$ \\
- 1 & $(1,1)$ &  9 & $(5,2)$ & 17 & $(5,8)$ \\
- 2 & $(1,1)$ & 10 & $(5,3)$ & 18 & $(6,8)$ \\
- 3 & $(1,1)$ & 11 & $(5,4)$ & 19 & $(7,8)$ \\
- 4 & $(1,1)$ & 12 & $(4,4)$ & 20 & $(8,8)$ \\
- 5 & $(2,1)$ & 13 & $(4,5)$ &    & \\
- 6 & $(3,1)$ & 14 & $(4,6)$ &    & \\
- 7 & $(4,1)$ & 15 & $(5,6)$ &    & \\
+ 0 & $(1,1)$ &  8 & $(5,3)$ & 16 & $(5,7)$ \\
+ 1 & $(2,1)$ &  9 & $(5,4)$ & 17 & $(5,8)$ \\
+ 2 & $(3,1)$ & 10 & $(4,4)$ & 18 & $(6,8)$ \\
+ 3 & $(4,1)$ & 11 & $(4,4)$ & 19 & $(7,8)$ \\
+ 4 & $(5,1)$ & 12 & $(4,5)$ & 20 & $(8,8)$ \\
+ 5 & $(5,2)$ & 13 & $(4,6)$ &    & \\
+ 6 & $(6,2)$ & 14 & $(4,7)$ &    & \\
+ 7 & $(5,2)$ & 15 & $(4,7)$ &    & \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -260,55 +255,69 @@ making the actual minimum at least~6. Since the constraint requires arrival at $
 it is geometrically impossible regardless of the chosen path. The model has no feasible
 solution.
 
+\textbf{Extended Result (Teleport Allowed):} If the movement constraint for the
+transition $t=2 \to t=3$ is relaxed (i.e.\ a ``ghost teleport'' is permitted),
+the model becomes feasible and yields $T^* = 14$ steps. Lara waits at $(1,1)$
+for two time steps, teleports to $(4,4)$ at $t=3$, then proceeds to the exit.
+
+\begin{center}
+\begin{tabular}{cc|cc|cc}
+\toprule
+$t$ & Cell & $t$ & Cell & $t$ & Cell \\
+\midrule
+ 0 & $(1,1)$ &  5 & $(5,3)$ & 10 & $(8,5)$ \\
+ 1 & $(2,1)$ &  6 & $(6,3)$ & 11 & $(8,5)$ \\
+ 2 & $(1,1)$ &  7 & $(7,3)$ & 12 & $(8,6)$ \\
+ 3 & $(4,4)$ \textit{[teleport]} &  8 & $(8,3)$ & 13 & $(8,7)$ \\
+ 4 & $(5,4)$ &  9 & $(8,4)$ & 14 & $(8,8)$ \\
+\bottomrule
+\end{tabular}
+\end{center}
 %-----------------------------------------------------------------------
 \subsection*{Task 6: Branch and Bound (Base Case)}
 
-\textbf{LP Relaxation.} Replace $x_{t,r,c}\in\{0,1\}$ with $x_{t,r,c}\in[0,1]$. The LP
-optimal value provides a lower bound on the IP optimal value. If the LP optimum is integer,
-it is also optimal for the IP.
+\textbf{Branching Strategy.}  
+If the LP relaxation gives a fractional solution, we branch on a fractional variable
+$x_{t,r,c}$ by creating two subproblems:
+\[
+x_{t,r,c} = 0 \quad \text{and} \quad x_{t,r,c} = 1.
+\]
 
-\textbf{Algorithm.} B\&B partitions the feasible region into subproblems (branching)
-and uses LP relaxation bounds to discard subproblems that cannot improve the best known
-integer solution (bounding). At each node it solves the LP relaxation; if the solution is
-already integer it updates the incumbent and fathoms the node, otherwise it branches on
-the most-fractional variable and the algorithm terminates when no active nodes remain.
+\textbf{Bounding Strategy.}  
+At each node, we solve the LP relaxation.  
+\begin{itemize}
+    \item If the solution is integer $\rightarrow$ it is feasible for the IP and becomes the incumbent.
+    \item If it cannot improve the current solution $\rightarrow$ the node is pruned.
+\end{itemize}
 
-\textbf{Application.} Since $T$ is fixed at $T^*=14$ by BFS, the IP is a feasibility
-problem with a constant zero objective. The constraints (C1)--(C5) -- in particular the
-movement constraint (C3) and the camera avoidance constraint (C4) -- are so tight that
-the LP relaxation already yields a fully integer solution at the root node. Therefore
-\textbf{no branching occurs}: the root node falls directly into Case~3 (integrality),
-the incumbent is set to the integer solution, and the algorithm terminates immediately.
+\textbf{Result for This Problem.}  
+Since $T^* = 14$ is fixed from BFS, the model becomes a feasibility problem.  
+Due to tight constraints (movement and camera avoidance), the LP relaxation at the root node
+already yields a fully integer solution.
 
 \medskip
+\textbf{Search Tree.}
+
 \begin{center}
 \begin{tikzpicture}[
-  every node/.style={draw, rounded corners=3pt, align=center,
-                     font=\small, inner sep=8pt, minimum width=72mm},
-  arr/.style={-Latex}
+  every node/.style={draw, rounded corners, align=center, font=\small, inner sep=6pt}
 ]
-\node (root) {%
-  \textbf{Node 0 (Root) -- only node}\\[4pt]
-  LP relaxation: $x_{t,r,c}\in[0,1]$\\
-  LP solution is fully integer\\
-  $\Rightarrow$ \textbf{Case 3 (Integrality): fathom, set incumbent}\\[2pt]
-  Optimal path confirmed: $T^*=14$
-};
+\node {Root Node\\
+LP relaxation solved\\
+Solution is integer\\
+$\Rightarrow$ Optimal};
 \end{tikzpicture}
 \end{center}
 
-\medskip
-No children are created. The B\&B tree consists of a single node, and the optimal solution
-is the path found by BFS with $T^*=14$ steps.
-
-\newpage
+\textbf{Conclusion.}  
+No branching is required. The algorithm terminates at the root node, and the optimal
 
 %=======================================================================
 \section*{\underline{Question 2: CCI Production Planning}}
 
 \subsection*{Problem Definition}
 
-Coca-Cola \.{I}\c{s}ecek (CCI) plans production at two plants -- Ankara~(A) and
+Coca-Cola \.{I}\c{c}ecek (CCI) plans production at two plants -- Ankara~(A) and
 Istanbul~(I) -- over $m=1,\ldots,6$ months. The objective is to minimize the total cost of
 inventory holding, cross-region transportation, workforce wages, hiring, layoffs, and
 bottling-mode switching, subject to demand, capacity, workforce, and cross-shipping
@@ -450,72 +459,4 @@ where $j^*(i)$ is the primary region of plant $i$.
 \[
   z_{i,m}\geq\delta_{i,1\mathrm{L},m}+\delta_{i,2\mathrm{L},m}-1 \qquad\forall\,i,m
 \]
-
-\subsection*{Gurobi Results}
-
-\textbf{Optimal Total Cost: $Z^*=2{,}168{,}800$ TL}
-
-\begin{center}
-\begin{tabular}{lr}
-\toprule
-Component & Cost (TL) \\
-\midrule
-Inventory holding      & $600{,}000$ \\
-Cross-region transport & $70{,}000$ \\
-Wages                  & $1{,}414{,}800$ \\
-Hiring                 & $72{,}000$ \\
-Layoffs                & $12{,}000$ \\
-Switching              & $0$ \\
-\midrule
-\textbf{Total}         & $\mathbf{2{,}168{,}800}$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-\textbf{Workforce decisions:}
-
-\begin{center}
-\begin{tabular}{crrrrrr}
-\toprule
-$m$ & $w_{A,m}$ & $h_{A,m}$ & $l_{A,m}$ & $w_{I,m}$ & $h_{I,m}$ & $l_{I,m}$ \\
-\midrule
-1 & 70 & 10 & 0 & 106 &  6 & 0 \\
-2 & 74 &  4 & 0 & 112 &  6 & 0 \\
-3 & 84 & 10 & 0 & 122 & 10 & 0 \\
-4 & 86 &  2 & 0 & 121 &  0 & 1 \\
-5 & 81 &  0 & 5 & 121 &  0 & 0 \\
-6 & 81 &  0 & 0 & 121 &  0 & 0 \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-\textbf{Production and inventory decisions (liters):}
-
-\begin{center}
-\begin{tabular}{crrrrrrrr}
-\toprule
-$m$ & $p^1_{A,m}$ & $p^2_{A,m}$ & $p^1_{I,m}$ & $p^2_{I,m}$
-    & $I_{A,m}$ & $I_{I,m}$ & $s_{A,W,m}$ & $s_{I,CE,m}$ \\
-\midrule
-1 & $7{,}000{,}000$ & $0$ & $0$ & $10{,}600{,}000$ & $700{,}000$ & $900{,}000$ & $0$ & $700{,}000$ \\
-2 & $7{,}200{,}000$ & $0$ & $0$ & $11{,}200{,}000$ & $800{,}000$ & $3{,}000{,}000$ & $0$ & $0$ \\
-3 & $0$ & $8{,}400{,}000$ & $0$ & $12{,}200{,}000$ & $1{,}200{,}000$ & $1{,}200{,}000$ & $0$ & $0$ \\
-4 & $0$ & $8{,}600{,}000$ & $0$ & $12{,}100{,}000$ & $800{,}000$ & $1{,}200{,}000$ & $0$ & $0$ \\
-5 & $0$ & $8{,}100{,}000$ & $0$ & $12{,}100{,}000$ & $900{,}000$ & $1{,}300{,}000$ & $0$ & $0$ \\
-6 & $0$ & $8{,}100{,}000$ & $0$ & $11{,}700{,}000$ & $0$ & $0$ & $0$ & $0$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-\textbf{Observations.}
-\begin{itemize}
-  \item No switching cost: each plant uses only one bottle size per month
-        ($z_{i,m}=0$ for all $i,m$). Ankara uses 1\,L in months~1--2 then 2\,L from
-        month~3; Istanbul uses only 2\,L throughout.
-  \item Cross-shipping is minimal: only Istanbul$\to$CE ships 0.700\,ML in month~1
-        (cap: $0.25\times7=1.75$ ML).
-  \item Wages dominate at $1{,}414{,}800$ TL ($\approx65\%$ of total).
-  \item Safety stock constraints bind in months~1--5.
-\end{itemize}
-
 \end{document}
