@@ -132,34 +132,25 @@ def runTimedBFS(extraBlockFn=None, forcedPositions=None):
 
 
 
-def solveMuseumIP(taskName, horizonT, addExtraConstraints=None, relaxedTransitions=None):
-    """
-    Build and solve the museum IP as a feasibility problem at fixed horizon T.
+T_MAX = 20
 
-    Decision variables: occupancy[t, r, c] in {0, 1}
-    Objective        : constant zero (feasibility)
 
-    Constraints enforced:
-      (C1) Start at START_CELL at t=0
-      (C2) Exactly one cell occupied per time step
-      (C3) Valid movement: backward + forward adjacency (no diagonal, no jump)
-           Transitions in relaxedTransitions are skipped (teleport allowed).
-      (C4) Camera avoidance: forbidden cells = 0 (exit exempt)
-      (C5) Must reach EXIT_CELL at t = horizonT
-
-    Returns (horizonT, path) or (None, None).
-    """
+def solveMuseumIP(taskName, addExtraConstraints=None, relaxedTransitions=None, T_max=T_MAX):
     model = gp.Model(taskName)
     model.setParam("OutputFlag", 0)
     model.setParam("TimeLimit", 120)
 
-    # Transitions (t -> t+1) where the movement constraint is lifted (teleport)
     relaxed = set(relaxedTransitions) if relaxedTransitions else set()
+    er, ec = EXIT_CELL
 
     occupancy = {
         (t, r, c): model.addVar(vtype=GRB.BINARY, name=f"occupy_t{t}_r{r}_c{c}")
-        for t in range(horizonT + 1)
+        for t in range(T_max + 1)
         for (r, c) in VALID_CELLS
+    }
+    z = {
+        t: model.addVar(vtype=GRB.BINARY, name=f"z_t{t}")
+        for t in range(T_max + 1)
     }
 
     model.addConstr(occupancy[0, START_CELL[0], START_CELL[1]] == 1)
@@ -167,44 +158,58 @@ def solveMuseumIP(taskName, horizonT, addExtraConstraints=None, relaxedTransitio
         if (r, c) != START_CELL:
             model.addConstr(occupancy[0, r, c] == 0)
 
-    for t in range(horizonT + 1):
+    for t in range(T_max + 1):
         model.addConstr(
             gp.quicksum(occupancy[t, r, c] for (r, c) in VALID_CELLS) == 1
         )
 
-    for t in range(horizonT):
+    model.addConstr(gp.quicksum(z[t] for t in range(T_max + 1)) == 1)
+
+    for t in range(T_max + 1):
+        model.addConstr(occupancy[t, er, ec] >= z[t])
+        if t > 0:
+            model.addConstr(occupancy[t, er, ec] >= occupancy[t - 1, er, ec])
+            model.addConstr(
+                occupancy[t, er, ec] - occupancy[t - 1, er, ec] <= z[t]
+            )
+
+    for t in range(T_max):
         if t in relaxed:
             continue
         for (r, c) in VALID_CELLS:
-            nbrs = getNeighbours(r, c)   
+            nbrs = getNeighbours(r, c)
             model.addConstr(
                 occupancy[t + 1, r, c]
                 <= gp.quicksum(occupancy[t, nr, nc] for (nr, nc) in nbrs)
             )
 
-    for t in range(horizonT + 1):
+    for t in range(T_max + 1):
         for (r, c) in getCameraVisibleCells(t):
             if (r, c) in VALID_CELLS and (r, c) != EXIT_CELL:
                 model.addConstr(occupancy[t, r, c] == 0)
 
-    model.addConstr(occupancy[horizonT, EXIT_CELL[0], EXIT_CELL[1]] == 1)
-
     if addExtraConstraints:
-        addExtraConstraints(model, occupancy, horizonT)
+        addExtraConstraints(model, occupancy, T_max)
 
-    model.setObjective(0, GRB.MINIMIZE)
+    model.setObjective(
+        gp.quicksum(t * z[t] for t in range(T_max + 1)), GRB.MINIMIZE
+    )
     model.optimize()
 
     if model.Status in (GRB.OPTIMAL, GRB.TIME_LIMIT) and model.SolCount > 0:
+        tStar = next(
+            (t for t in range(T_max + 1) if z[t].X > 0.5), None
+        )
+        if tStar is None:
+            return None, None
         path = []
-        for t in range(horizonT + 1):
-            for (r, c) in sorted(VALID_CELLS):   # deterministic order
+        for t in range(tStar + 1):
+            for (r, c) in sorted(VALID_CELLS):
                 if occupancy[t, r, c].X > 0.5:
                     path.append((t, r, c))
                     break
-        return horizonT, path
+        return tStar, path
     return None, None
-
 
 
 def printPath(label, optimalT, path):
@@ -225,7 +230,6 @@ def printPath(label, optimalT, path):
 
 
 def validatePath(label, path):
-    """Check all constraints: no obstacles, no cameras, valid moves, correct endpoints."""
     if path is None:
         return
     allOk = True
@@ -235,7 +239,7 @@ def validatePath(label, path):
             print(f"  FAIL [{label}] t={t}: ({r},{c}) is an obstacle!")
             allOk = False
         if (r, c) != EXIT_CELL and (r, c) in getCameraVisibleCells(t):
-            print(f"  FAIL [{label}] t={t}: ({r},{c}) is camera-visible!")
+            print(f"  FAIL [{label}] t={t}: ({r},{c}) is camera visible!")
             allOk = False
         if t > 0:
             prevRow, prevCol = cellAt[t - 1]
@@ -251,18 +255,15 @@ def validatePath(label, path):
     if allOk:
         print(f"  OK [{label}] all constraints satisfied.")
 
-
-
 print("  QUESTION 1 – MUSEUM ESCAPE")
 
 baseOptimalT, _ = runTimedBFS()
 print(f"\n  [BFS] Base case optimal T = {baseOptimalT}")
-task2_T, task2_path = solveMuseumIP("Task2_BaseCase", baseOptimalT)
+task2_T, task2_path = solveMuseumIP("Task2_BaseCase")
 printPath("Task 2 – Base Case", task2_T, task2_path)
 validatePath("Task2", task2_path)
 
 #  Task 2 – Branch-and-Bound
-
 class BBNode:
     __slots__ = ("fixings", "depth", "label")
 
@@ -272,10 +273,12 @@ class BBNode:
         self.label   = label
 
 
-def _buildLPSubproblem(taskName, horizonT, fixings):
+def _buildLPSubproblem(taskName, T_max, fixings):
     model = gp.Model(taskName)
     model.setParam("OutputFlag", 0)
     model.setParam("TimeLimit", 30)
+
+    er, ec = EXIT_CELL
 
     occupancy = {
         (t, r, c): model.addVar(
@@ -283,8 +286,12 @@ def _buildLPSubproblem(taskName, horizonT, fixings):
             vtype=GRB.CONTINUOUS,
             name=f"occ_t{t}_r{r}_c{c}",
         )
-        for t in range(horizonT + 1)
+        for t in range(T_max + 1)
         for (r, c) in VALID_CELLS
+    }
+    z = {
+        t: model.addVar(lb=0.0, ub=1.0, vtype=GRB.CONTINUOUS, name=f"z_t{t}")
+        for t in range(T_max + 1)
     }
 
     model.addConstr(occupancy[0, START_CELL[0], START_CELL[1]] == 1.0)
@@ -292,12 +299,22 @@ def _buildLPSubproblem(taskName, horizonT, fixings):
         if (r, c) != START_CELL:
             model.addConstr(occupancy[0, r, c] == 0.0)
 
-    for t in range(horizonT + 1):
+    for t in range(T_max + 1):
         model.addConstr(
             gp.quicksum(occupancy[t, r, c] for (r, c) in VALID_CELLS) == 1.0
         )
 
-    for t in range(horizonT):
+    model.addConstr(gp.quicksum(z[t] for t in range(T_max + 1)) == 1.0)
+
+    for t in range(T_max + 1):
+        model.addConstr(occupancy[t, er, ec] >= z[t])
+        if t > 0:
+            model.addConstr(occupancy[t, er, ec] >= occupancy[t - 1, er, ec])
+            model.addConstr(
+                occupancy[t, er, ec] - occupancy[t - 1, er, ec] <= z[t]
+            )
+
+    for t in range(T_max):
         for (r, c) in VALID_CELLS:
             nbrs = getNeighbours(r, c)
             model.addConstr(
@@ -305,27 +322,30 @@ def _buildLPSubproblem(taskName, horizonT, fixings):
                 <= gp.quicksum(occupancy[t, nr, nc] for (nr, nc) in nbrs)
             )
 
-    for t in range(horizonT + 1):
+    for t in range(T_max + 1):
         for (r, c) in getCameraVisibleCells(t):
             if (r, c) in VALID_CELLS and (r, c) != EXIT_CELL:
                 model.addConstr(occupancy[t, r, c] == 0.0)
 
-    model.addConstr(occupancy[horizonT, EXIT_CELL[0], EXIT_CELL[1]] == 1.0)
-
     for (t, r, c), val in fixings.items():
         model.addConstr(occupancy[t, r, c] == float(val))
 
-    model.setObjective(0, GRB.MINIMIZE)
-    return model, occupancy
+    model.setObjective(
+        gp.quicksum(t * z[t] for t in range(T_max + 1)), GRB.MINIMIZE
+    )
+    return model, occupancy, z
 
 
 def _isFractional(val, tol=1e-6):
     return tol < val < 1.0 - tol
 
 
-def _extractPath(horizonT, occupancy):
+def _extractPath(T_max, occupancy, z):
+    tStar = next((t for t in range(T_max + 1) if z[t].X > 0.5), None)
+    if tStar is None:
+        return None
     path = []
-    for t in range(horizonT + 1):
+    for t in range(tStar + 1):
         for (r, c) in sorted(VALID_CELLS):
             if occupancy[t, r, c].X > 0.5:
                 path.append((t, r, c))
@@ -333,81 +353,78 @@ def _extractPath(horizonT, occupancy):
     return path
 
 
-def solveMuseumBranchAndBound(horizonT):
-    print(f"  [B&B] Fixed horizon T = {horizonT}")
+def solveMuseumBranchAndBound(integerUB, incumbentPath, T_max=T_MAX):
+    print(f"  [B&B] T_max = {T_max}, integer UB = {integerUB}")
 
     rootNode = BBNode(fixings={}, depth=0, label="Root")
-    stack = [rootNode]     
+    stack = [rootNode]
     nodeCount = 0
+    tol = 1e-6
 
     while stack:
         node = stack.pop()
         nodeCount += 1
-        indent = "    " + "  " * node.depth   
+        indent = "    " + "  " * node.depth
 
-        model, occupancy = _buildLPSubproblem(
-            f"BB_node_{nodeCount}", horizonT, node.fixings
+        model, occupancy, z = _buildLPSubproblem(
+            f"BB_node_{nodeCount}", T_max, node.fixings
         )
         model.optimize()
 
         lpFeasible = model.Status in (GRB.OPTIMAL, GRB.TIME_LIMIT) and model.SolCount > 0
-
         if not lpFeasible:
             print(f"{indent}[B&B] Node {node.label} (depth {node.depth}): "
-                  f"LP INFEASIBLE – pruned.")
+                  f"LP INFEASIBLE - pruned.")
             continue
 
-        fractionalVar = None   
-        for t in range(horizonT + 1):
+        lpLB = model.ObjVal
+        print(f"{indent}[B&B] Node {node.label} (depth {node.depth}): "
+              f"LP LB = {lpLB:.4f}, integer UB = {integerUB}.")
+
+        if lpLB >= integerUB - tol:
+            if node.depth == 0:
+                print(f"{indent}[B&B] Root fathomed by bound: LP LB == UB == "
+                      f"{integerUB}. Optimal. No branching required.")
+            else:
+                print(f"{indent}[B&B] Pruned by bound (LB >= UB).")
+            if node.depth == 0:
+                print(f"  [B&B] Total nodes explored: {nodeCount}")
+                return integerUB, incumbentPath
+            continue
+
+        fractionalVar = None
+        for t in range(T_max + 1):
             for (r, c) in sorted(VALID_CELLS):
-                val = occupancy[t, r, c].X
-                if _isFractional(val):
+                if _isFractional(occupancy[t, r, c].X):
                     fractionalVar = (t, r, c)
                     break
             if fractionalVar is not None:
                 break
 
         if fractionalVar is None:
-            path = _extractPath(horizonT, occupancy)
-            if node.depth == 0:
-                print(f"{indent}[B&B] Root Node: Solved, integer solution found. "
-                      f"No branching required.")
-            else:
-                print(f"{indent}[B&B] Node {node.label} (depth {node.depth}): "
-                      f"Integer solution found. B&B terminates.")
+            path = _extractPath(T_max, occupancy, z)
+            print(f"{indent}[B&B] Node {node.label}: integer solution at LP. "
+                  f"Terminating.")
             print(f"  [B&B] Total nodes explored: {nodeCount}")
-            return horizonT, path
+            return int(round(lpLB)), path
 
         ft, fr, fc = fractionalVar
         fracVal = occupancy[ft, fr, fc].X
-        print(f"{indent}[B&B] Node {node.label} (depth {node.depth}): "
-              f"LP feasible, fractional occ[t={ft},r={fr},c={fc}]={fracVal:.4f}. "
-              f"Branching ...")
+        print(f"{indent}[B&B] Branching on fractional occ[t={ft},r={fr},c={fc}]"
+              f"={fracVal:.4f}.")
 
-        fixings0 = dict(node.fixings)
-        fixings0[fractionalVar] = 0
-        child0 = BBNode(
-            fixings=fixings0,
-            depth=node.depth + 1,
-            label=f"{node.label}->occ[{ft},{fr},{fc}]=0",
-        )
+        fixings0 = dict(node.fixings); fixings0[fractionalVar] = 0
+        fixings1 = dict(node.fixings); fixings1[fractionalVar] = 1
+        stack.append(BBNode(fixings1, node.depth + 1,
+                            f"{node.label}->occ[{ft},{fr},{fc}]=1"))
+        stack.append(BBNode(fixings0, node.depth + 1,
+                            f"{node.label}->occ[{ft},{fr},{fc}]=0"))
 
-        fixings1 = dict(node.fixings)
-        fixings1[fractionalVar] = 1
-        child1 = BBNode(
-            fixings=fixings1,
-            depth=node.depth + 1,
-            label=f"{node.label}->occ[{ft},{fr},{fc}]=1",
-        )
-
-        stack.append(child1)
-        stack.append(child0)
-
-    print(f"  [B&B] Stack exhausted. Problem INFEASIBLE at T={horizonT}.")
+    print(f"  [B&B] Stack exhausted. INFEASIBLE.")
     print(f"  [B&B] Total nodes explored: {nodeCount}")
     return None, None
 
-bb2_T, bb2_path = solveMuseumBranchAndBound(baseOptimalT)
+bb2_T, bb2_path = solveMuseumBranchAndBound(baseOptimalT, task2_path)
 printPath("Task 2 – Base Case (Branch-and-Bound)", bb2_T, bb2_path)
 validatePath("Task2_BB", bb2_path)
 
@@ -423,7 +440,6 @@ def addBoobyTrapConstraints(model, occupancy, horizonT):
     if FORBIDDEN_CELL not in VALID_CELLS:
         print("  NOTE: forbidden cell (8,3) is an obstacle - already unreachable.")
         return
-    # trapTriggered[t] = 1 if Lara has visited TRAP_CELL at or before time t
     trapTriggered = {
         t: model.addVar(vtype=GRB.BINARY, name=f"trapTriggered_t{t}")
         for t in range(horizonT + 1)
@@ -437,15 +453,7 @@ def addBoobyTrapConstraints(model, occupancy, horizonT):
             occupancy[t, FORBIDDEN_CELL[0], FORBIDDEN_CELL[1]] <= 1 - trapTriggered[t - 1]
         )
 
-
-task3_T, task3_path = solveMuseumIP("Task3_BoobyTrap", baseOptimalT, addBoobyTrapConstraints)
-if task3_T is None:
-    for extraSteps in range(1, 10):
-        task3_T, task3_path = solveMuseumIP(
-            "Task3_BoobyTrap", baseOptimalT + extraSteps, addBoobyTrapConstraints
-        )
-        if task3_T is not None:
-            break
+task3_T, task3_path = solveMuseumIP("Task3_BoobyTrap", addBoobyTrapConstraints)
 printPath("Task 3 - Booby Trap [(5,1) -> never (8,3)]", task3_T, task3_path)
 validatePath("Task3", task3_path)
 
@@ -465,13 +473,7 @@ def addExitLockConstraints(model, occupancy, horizonT):
                 model.addConstr(occupancy[t, r, c] == 0)
 
 
-task4_T, _ = runTimedBFS(extraBlockFn=isExitLockBlocked)
-print(f"\n  [BFS] Task 4 (exit lock) optimal T = {task4_T}")
-if task4_T is None:
-    print("  BFS: no path found with exit lock constraint.")
-    task4_T, task4_path = None, None
-else:
-    task4_T, task4_path = solveMuseumIP("Task4_ExitLock", task4_T, addExitLockConstraints)
+task4_T, task4_path = solveMuseumIP("Task4_ExitLock", addExitLockConstraints)
 printPath("Task 4 - Exit Lock (cells forbidden before t=18)", task4_T, task4_path)
 validatePath("Task4", task4_path)
 
@@ -490,42 +492,15 @@ def addGhostCheckpointConstraints(model, occupancy, horizonT):
         return
     model.addConstr(occupancy[GHOST_TIME, GHOST_CELL[0], GHOST_CELL[1]] == 1)
 
-print(f"\n  [Task 5] Forced teleport to {GHOST_CELL} at t={GHOST_TIME}; "
-      f"relaxing movement constraint for transition t=2->t=3.")
-print(f"  [Task 5] Searching from T={TASK5_TARGET_T} upward ...")
+print(f"\n  [Task 5] Ghost Checkpoint at {GHOST_CELL} at t={GHOST_TIME}.")
 
-task5_T, task5_path = None, None
-for candidateT in range(TASK5_TARGET_T, TASK5_TARGET_T + 10):
-    task5_T, task5_path = solveMuseumIP(
-        "Task5_GhostCheckpoint",
-        candidateT,
-        addGhostCheckpointConstraints,
-        relaxedTransitions={2},   
-    )
-    if task5_T is not None:
-        break
+task5_T, task5_path = solveMuseumIP(
+    "Task5_GhostCheckpoint",
+    addGhostCheckpointConstraints,
+)
 
-printPath("Task 5 - Ghost Checkpoint [(4,4) at t=3, teleport allowed]", task5_T, task5_path)
-if task5_path is not None:
-    print("  [Task5] Note: the t=2->t=3 transition is a deliberate teleport; "
-          "all other steps are validated below.")
-    cellAt = {t: (r, c) for t, r, c in task5_path}
-    allOk = True
-    for t, r, c in task5_path:
-        if (r, c) in OBSTACLE_CELLS:
-            print(f"  FAIL [Task5] t={t}: ({r},{c}) is an obstacle!")
-            allOk = False
-        if (r, c) != EXIT_CELL and (r, c) in getCameraVisibleCells(t):
-            print(f"  FAIL [Task5] t={t}: ({r},{c}) camera-visible!")
-            allOk = False
-        if t > 0 and t != GHOST_TIME:   # skip the teleport step
-            pr, pc = cellAt[t - 1]
-            if abs(r - pr) + abs(c - pc) > 1:
-                print(f"  FAIL [Task5] illegal jump ({pr},{pc}) -> ({r},{c}) at t={t}")
-                allOk = False
-    if allOk:
-        print("  OK [Task5] all non-teleport constraints satisfied.")
-
+printPath("Task 5 - Ghost Checkpoint [(4,4) at t=3]", task5_T, task5_path)
+validatePath("Task5", task5_path)
 
 print("  Q1 Summary")
 for taskLabel, result in [
@@ -539,54 +514,60 @@ for taskLabel, result in [
 
 
 #  QUESTION 2 – CCI PRODUCTION PLANNING
-print()
-print("  QUESTION 2 – CCI PRODUCTION PLANNING")
 
-MONTHS = list(range(1, 7))   # m = 1, ..., 6
+MONTHS = list(range(1, 7))  
 
 demandWestern = {1: 9_000_000, 2: 9_000_000, 3: 14_000_000,
                  4: 12_000_000, 5: 12_000_000, 6: 13_000_000}
 demandCentEast = {1: 7_000_000, 2: 7_000_000, 3: 8_000_000,
                   4: 9_000_000,  5: 8_000_000,  6: 9_000_000}
 
-ANKARA_RATE_2L   = 6_000 * 2    # 12,000 L/hr
-ANKARA_RATE_1L   = 10_000 * 1   # 10,000 L/hr
-ISTANBUL_RATE_2L = 9_000 * 2    # 18,000 L/hr
-ISTANBUL_RATE_1L = 15_000 * 1   # 15,000 L/hr
-BOTTLING_HOURS_PER_MONTH = 720   # hours available 
+ANKARA_RATE_2L   = 6_000 * 2  
+ANKARA_RATE_1L   = 10_000 * 1   
+ISTANBUL_RATE_2L = 9_000 * 2   
+ISTANBUL_RATE_1L = 15_000 * 1   
+BOTTLING_HOURS_PER_MONTH = 720  
 
-PACKAGING_CAPACITY_PER_WORKER = 100_000   # liters per worker per month
+PACKAGING_CAPACITY_PER_WORKER = 100_000   
 INITIAL_WORKERS_ANKARA   = 60
 INITIAL_WORKERS_ISTANBUL = 100
 
-WAGE_PER_WORKER     = 1_200    # TL per worker per month
-HIRING_COST         = 1_500    # TL per new hire
-LAYOFF_COST         = 2_000    # TL per layoff
-INVENTORY_COST_PER_LITER  = 0.05   # TL per liter per month
-TRANSPORT_COST_PER_LITER  = 0.10   # TL per liter (cross-region only)
-SWITCHING_COST      = 20_000   # TL per plant per month (both sizes in same month)
+WAGE_PER_WORKER          = 1_200    
+HIRING_COST              = 1_500    
+LAYOFF_COST              = 2_000    
+INVENTORY_COST_PER_LITER = 0.05     
+TRANSPORT_COST_PER_LITER = 0.10     
+SWITCHING_COST           = 20_000   
 
-CROSS_SHIP_CAP_FRACTION = 0.25   # α: at most 25% of demand from non-primary plant
-SAFETY_STOCK_FRACTION   = 0.10   # β: end-of-month inventory ≥ 10% of next month demand
-MAX_WORKFORCE_CHANGE    = 10     # Δ: maximum change in workers between consecutive months
-BIG_M_PRODUCTION        = 50_000_000   # liters (safe upper bound for linking binary vars)
+CROSS_SHIP_CAP_FRACTION = 0.25   
+SAFETY_STOCK_FRACTION   = 0.10   
+MAX_WORKFORCE_CHANGE    = 10     
+BIG_M_PRODUCTION        = 50_000_000   
+
+DEMAND_FRAC_2L = 0.60  
+DEMAND_FRAC_1L = 0.40   
 
 cciModel = gp.Model("CCI_ProductionPlan")
 cciModel.setParam("OutputFlag", 0)
-
 
 prod1L_ankara   = {m: cciModel.addVar(lb=0, name=f"prod1L_ankara_m{m}")   for m in MONTHS}
 prod2L_ankara   = {m: cciModel.addVar(lb=0, name=f"prod2L_ankara_m{m}")   for m in MONTHS}
 prod1L_istanbul = {m: cciModel.addVar(lb=0, name=f"prod1L_istanbul_m{m}") for m in MONTHS}
 prod2L_istanbul = {m: cciModel.addVar(lb=0, name=f"prod2L_istanbul_m{m}") for m in MONTHS}
 
-supply_ankara_to_centEast   = {m: cciModel.addVar(lb=0, name=f"supply_ankara_centEast_m{m}")   for m in MONTHS}
-supply_ankara_to_western    = {m: cciModel.addVar(lb=0, name=f"supply_ankara_western_m{m}")    for m in MONTHS}
-supply_istanbul_to_western  = {m: cciModel.addVar(lb=0, name=f"supply_istanbul_western_m{m}")  for m in MONTHS}
-supply_istanbul_to_centEast = {m: cciModel.addVar(lb=0, name=f"supply_istanbul_centEast_m{m}") for m in MONTHS}
+supply_1L_ankara_to_centEast   = {m: cciModel.addVar(lb=0, name=f"supply_1L_ankara_centEast_m{m}")   for m in MONTHS}
+supply_2L_ankara_to_centEast   = {m: cciModel.addVar(lb=0, name=f"supply_2L_ankara_centEast_m{m}")   for m in MONTHS}
+supply_1L_ankara_to_western    = {m: cciModel.addVar(lb=0, name=f"supply_1L_ankara_western_m{m}")    for m in MONTHS}
+supply_2L_ankara_to_western    = {m: cciModel.addVar(lb=0, name=f"supply_2L_ankara_western_m{m}")    for m in MONTHS}
+supply_1L_istanbul_to_western  = {m: cciModel.addVar(lb=0, name=f"supply_1L_istanbul_western_m{m}")  for m in MONTHS}
+supply_2L_istanbul_to_western  = {m: cciModel.addVar(lb=0, name=f"supply_2L_istanbul_western_m{m}")  for m in MONTHS}
+supply_1L_istanbul_to_centEast = {m: cciModel.addVar(lb=0, name=f"supply_1L_istanbul_centEast_m{m}") for m in MONTHS}
+supply_2L_istanbul_to_centEast = {m: cciModel.addVar(lb=0, name=f"supply_2L_istanbul_centEast_m{m}") for m in MONTHS}
 
-inventory_ankara   = {m: cciModel.addVar(lb=0, name=f"inventory_ankara_m{m}")   for m in MONTHS}
-inventory_istanbul = {m: cciModel.addVar(lb=0, name=f"inventory_istanbul_m{m}") for m in MONTHS}
+inventory_1L_ankara   = {m: cciModel.addVar(lb=0, name=f"inventory_1L_ankara_m{m}")   for m in MONTHS}
+inventory_2L_ankara   = {m: cciModel.addVar(lb=0, name=f"inventory_2L_ankara_m{m}")   for m in MONTHS}
+inventory_1L_istanbul = {m: cciModel.addVar(lb=0, name=f"inventory_1L_istanbul_m{m}") for m in MONTHS}
+inventory_2L_istanbul = {m: cciModel.addVar(lb=0, name=f"inventory_2L_istanbul_m{m}") for m in MONTHS}
 
 workers_ankara   = {m: cciModel.addVar(lb=0, vtype=GRB.INTEGER, name=f"workers_ankara_m{m}")   for m in MONTHS}
 workers_istanbul = {m: cciModel.addVar(lb=0, vtype=GRB.INTEGER, name=f"workers_istanbul_m{m}") for m in MONTHS}
@@ -607,8 +588,10 @@ switching_istanbul = {m: cciModel.addVar(vtype=GRB.BINARY, name=f"switching_ista
 for m in MONTHS:
     prevWorkers_ankara   = INITIAL_WORKERS_ANKARA   if m == 1 else workers_ankara[m - 1]
     prevWorkers_istanbul = INITIAL_WORKERS_ISTANBUL if m == 1 else workers_istanbul[m - 1]
-    prevInventory_ankara   = 0 if m == 1 else inventory_ankara[m - 1]
-    prevInventory_istanbul = 0 if m == 1 else inventory_istanbul[m - 1]
+    prevInventory_1L_ankara   = 0 if m == 1 else inventory_1L_ankara[m - 1]
+    prevInventory_2L_ankara   = 0 if m == 1 else inventory_2L_ankara[m - 1]
+    prevInventory_1L_istanbul = 0 if m == 1 else inventory_1L_istanbul[m - 1]
+    prevInventory_2L_istanbul = 0 if m == 1 else inventory_2L_istanbul[m - 1]
 
     totalProduction_ankara   = prod1L_ankara[m]   + prod2L_ankara[m]
     totalProduction_istanbul = prod1L_istanbul[m] + prod2L_istanbul[m]
@@ -660,33 +643,76 @@ for m in MONTHS:
     )
 
     cciModel.addConstr(
-        inventory_ankara[m]
-        == prevInventory_ankara + totalProduction_ankara
-           - supply_ankara_to_centEast[m] - supply_ankara_to_western[m],
-        name=f"inventoryBal_ankara_m{m}"
+        inventory_1L_ankara[m]
+        == prevInventory_1L_ankara + prod1L_ankara[m]
+           - supply_1L_ankara_to_centEast[m] - supply_1L_ankara_to_western[m],
+        name=f"inventoryBal_1L_ankara_m{m}"
     )
     cciModel.addConstr(
-        inventory_istanbul[m]
-        == prevInventory_istanbul + totalProduction_istanbul
-           - supply_istanbul_to_western[m] - supply_istanbul_to_centEast[m],
-        name=f"inventoryBal_istanbul_m{m}"
+        inventory_2L_ankara[m]
+        == prevInventory_2L_ankara + prod2L_ankara[m]
+           - supply_2L_ankara_to_centEast[m] - supply_2L_ankara_to_western[m],
+        name=f"inventoryBal_2L_ankara_m{m}"
+    )
+    cciModel.addConstr(
+        inventory_1L_istanbul[m]
+        == prevInventory_1L_istanbul + prod1L_istanbul[m]
+           - supply_1L_istanbul_to_western[m] - supply_1L_istanbul_to_centEast[m],
+        name=f"inventoryBal_1L_istanbul_m{m}"
+    )
+    cciModel.addConstr(
+        inventory_2L_istanbul[m]
+        == prevInventory_2L_istanbul + prod2L_istanbul[m]
+           - supply_2L_istanbul_to_western[m] - supply_2L_istanbul_to_centEast[m],
+        name=f"inventoryBal_2L_istanbul_m{m}"
     )
 
     cciModel.addConstr(
-        supply_ankara_to_centEast[m] + supply_istanbul_to_centEast[m] >= demandCentEast[m],
-        name=f"demandFulfill_centEast_m{m}"
+        inventory_1L_ankara[m] <= prod1L_ankara[m],
+        name=f"perishability_1L_ankara_m{m}"
     )
     cciModel.addConstr(
-        supply_istanbul_to_western[m] + supply_ankara_to_western[m] >= demandWestern[m],
-        name=f"demandFulfill_western_m{m}"
+        inventory_2L_ankara[m] <= prod2L_ankara[m],
+        name=f"perishability_2L_ankara_m{m}"
+    )
+    cciModel.addConstr(
+        inventory_1L_istanbul[m] <= prod1L_istanbul[m],
+        name=f"perishability_1L_istanbul_m{m}"
+    )
+    cciModel.addConstr(
+        inventory_2L_istanbul[m] <= prod2L_istanbul[m],
+        name=f"perishability_2L_istanbul_m{m}"
     )
 
     cciModel.addConstr(
-        supply_ankara_to_western[m] <= CROSS_SHIP_CAP_FRACTION * demandWestern[m],
+        supply_2L_ankara_to_centEast[m] + supply_2L_istanbul_to_centEast[m]
+        == DEMAND_FRAC_2L * demandCentEast[m],
+        name=f"demandFulfill_2L_centEast_m{m}"
+    )
+    cciModel.addConstr(
+        supply_1L_ankara_to_centEast[m] + supply_1L_istanbul_to_centEast[m]
+        == DEMAND_FRAC_1L * demandCentEast[m],
+        name=f"demandFulfill_1L_centEast_m{m}"
+    )
+    cciModel.addConstr(
+        supply_2L_istanbul_to_western[m] + supply_2L_ankara_to_western[m]
+        == DEMAND_FRAC_2L * demandWestern[m],
+        name=f"demandFulfill_2L_western_m{m}"
+    )
+    cciModel.addConstr(
+        supply_1L_istanbul_to_western[m] + supply_1L_ankara_to_western[m]
+        == DEMAND_FRAC_1L * demandWestern[m],
+        name=f"demandFulfill_1L_western_m{m}"
+    )
+
+    cciModel.addConstr(
+        supply_1L_ankara_to_western[m] + supply_2L_ankara_to_western[m]
+        <= CROSS_SHIP_CAP_FRACTION * demandWestern[m],
         name=f"crossShipCap_ankara_western_m{m}"
     )
     cciModel.addConstr(
-        supply_istanbul_to_centEast[m] <= CROSS_SHIP_CAP_FRACTION * demandCentEast[m],
+        supply_1L_istanbul_to_centEast[m] + supply_2L_istanbul_to_centEast[m]
+        <= CROSS_SHIP_CAP_FRACTION * demandCentEast[m],
         name=f"crossShipCap_istanbul_centEast_m{m}"
     )
 
@@ -721,26 +747,36 @@ for m in MONTHS:
     )
 
     if m == 6:
-        cciModel.addConstr(inventory_ankara[m] == 0,   name="zeroInventory_ankara_end")
-        cciModel.addConstr(inventory_istanbul[m] == 0, name="zeroInventory_istanbul_end")
+        cciModel.addConstr(inventory_1L_ankara[m] == 0,   name="zeroInventory_1L_ankara_end")
+        cciModel.addConstr(inventory_2L_ankara[m] == 0,   name="zeroInventory_2L_ankara_end")
+        cciModel.addConstr(inventory_1L_istanbul[m] == 0, name="zeroInventory_1L_istanbul_end")
+        cciModel.addConstr(inventory_2L_istanbul[m] == 0, name="zeroInventory_2L_istanbul_end")
 
 for m in range(1, 6):
     cciModel.addConstr(
-        inventory_istanbul[m] >= SAFETY_STOCK_FRACTION * demandWestern[m + 1],
+        inventory_1L_istanbul[m] + inventory_2L_istanbul[m]
+        >= SAFETY_STOCK_FRACTION * demandWestern[m + 1],
         name=f"safetyStock_istanbul_m{m}"
     )
     cciModel.addConstr(
-        inventory_ankara[m] >= SAFETY_STOCK_FRACTION * demandCentEast[m + 1],
+        inventory_1L_ankara[m] + inventory_2L_ankara[m]
+        >= SAFETY_STOCK_FRACTION * demandCentEast[m + 1],
         name=f"safetyStock_ankara_m{m}"
     )
 
 
 inventoryHoldingCost = gp.quicksum(
-    INVENTORY_COST_PER_LITER * (inventory_ankara[m] + inventory_istanbul[m])
+    INVENTORY_COST_PER_LITER * (
+        inventory_1L_ankara[m] + inventory_2L_ankara[m]
+        + inventory_1L_istanbul[m] + inventory_2L_istanbul[m]
+    )
     for m in MONTHS
 )
 crossRegionTransportCost = gp.quicksum(
-    TRANSPORT_COST_PER_LITER * (supply_ankara_to_western[m] + supply_istanbul_to_centEast[m])
+    TRANSPORT_COST_PER_LITER * (
+        supply_1L_ankara_to_western[m] + supply_2L_ankara_to_western[m]
+        + supply_1L_istanbul_to_centEast[m] + supply_2L_istanbul_to_centEast[m]
+    )
     for m in MONTHS
 )
 wageCost = gp.quicksum(
@@ -767,123 +803,3 @@ cciModel.setObjective(
 )
 
 cciModel.optimize()
-#  Q2 – Results 
-
-if cciModel.Status == GRB.OPTIMAL:
-    print()
-    print("  " + "=" *60)
-    print("  CCI PRODUCTION PLANNING – OPTIMAL SOLUTION")
-    print("  " + "=" * 60)
-
-    def _v(expr):
-        return sum(c * v.X for v, c in zip(expr.getVars(),
-                                            [expr.getCoeff(i)
-                                             for i in range(expr.size())]))
-
-    totalCost        = cciModel.ObjVal
-    holdingVal       = sum(INVENTORY_COST_PER_LITER *
-                           (inventory_ankara[m].X + inventory_istanbul[m].X)
-                           for m in MONTHS)
-    transportVal     = sum(TRANSPORT_COST_PER_LITER *
-                           (supply_ankara_to_western[m].X +
-                            supply_istanbul_to_centEast[m].X)
-                           for m in MONTHS)
-    wageVal          = sum(WAGE_PER_WORKER *
-                           (workers_ankara[m].X + workers_istanbul[m].X)
-                           for m in MONTHS)
-    hiringVal        = sum(HIRING_COST *
-                           (hired_ankara[m].X + hired_istanbul[m].X)
-                           for m in MONTHS)
-    layoffVal        = sum(LAYOFF_COST *
-                           (laidOff_ankara[m].X + laidOff_istanbul[m].X)
-                           for m in MONTHS)
-    switchingVal     = sum(SWITCHING_COST *
-                           (switching_ankara[m].X + switching_istanbul[m].X)
-                           for m in MONTHS)
-
-    print()
-    print(f"  Total Minimum Cost      : {totalCost:>18,.2f} TL")
-    print(f"  ----------------------------------------")
-    print(f"    Wage cost             : {wageVal:>18,.2f} TL")
-    print(f"    Hiring cost           : {hiringVal:>18,.2f} TL")
-    print(f"    Layoff cost           : {layoffVal:>18,.2f} TL")
-    print(f"    Inventory holding     : {holdingVal:>18,.2f} TL")
-    print(f"    Cross-region transport: {transportVal:>18,.2f} TL")
-    print(f"    Bottling switch cost  : {switchingVal:>18,.2f} TL")
-
-    print()
-    print("  MONTHLY DETAIL")
-    print("  " + "-" * 60)
-
-    HDR = (f"  {'Month':>5}  "
-           f"{'Plant':<9}  "
-           f"{'Prod1L(L)':>13}  "
-           f"{'Prod2L(L)':>13}  "
-           f"{'Workers':>7}  "
-           f"{'Hired':>5}  "
-           f"{'LaidOff':>7}  "
-           f"{'Inventory(L)':>13}  "
-           f"{'XShip(L)':>12}")
-    print(HDR)
-    print("  " + "-" * 72)
-
-    for m in MONTHS:
-        p1a  = prod1L_ankara[m].X
-        p2a  = prod2L_ankara[m].X
-        wa   = round(workers_ankara[m].X)
-        ha   = round(hired_ankara[m].X)
-        la   = round(laidOff_ankara[m].X)
-        ia   = inventory_ankara[m].X
-        xsa  = supply_ankara_to_western[m].X
-
-        print(f"  {m:>5}  "
-              f"{'Ankara':<9}  "
-              f"{p1a:>13,.0f}  "
-              f"{p2a:>13,.0f}  "
-              f"{wa:>7}  "
-              f"{ha:>5}  "
-              f"{la:>7}  "
-              f"{ia:>13,.0f}  "
-              f"{xsa:>12,.0f}")
-
-        p1i  = prod1L_istanbul[m].X
-        p2i  = prod2L_istanbul[m].X
-        wi   = round(workers_istanbul[m].X)
-        hi   = round(hired_istanbul[m].X)
-        li   = round(laidOff_istanbul[m].X)
-        ii   = inventory_istanbul[m].X
-        xsi  = supply_istanbul_to_centEast[m].X
-
-        print(f"  {'':>5}  "
-              f"{'Istanbul':<9}  "
-              f"{p1i:>13,.0f}  "
-              f"{p2i:>13,.0f}  "
-              f"{wi:>7}  "
-              f"{hi:>5}  "
-              f"{li:>7}  "
-              f"{ii:>13,.0f}  "
-              f"{xsi:>12,.0f}")
-
-        wD   = demandWestern[m]
-        ceD  = demandCentEast[m]
-        wSup = supply_istanbul_to_western[m].X + supply_ankara_to_western[m].X
-        ceSup= supply_ankara_to_centEast[m].X  + supply_istanbul_to_centEast[m].X
-        print(f"  {'':>5}  "
-              f"  Western demand {wD/1e6:.1f}M L -> supplied {wSup/1e6:.3f}M L  |  "
-              f"CentEast demand {ceD/1e6:.1f}M L -> supplied {ceSup/1e6:.3f}M L")
-
-        if m < len(MONTHS):
-            print("  " + "  " + "-" * 68)
-
-    print("  " + "=" * 72)
-    print()
-
-else:
-    statusMap = {
-        GRB.INFEASIBLE:      "INFEASIBLE",
-        GRB.INF_OR_UNBD:     "INF_OR_UNBD",
-        GRB.UNBOUNDED:       "UNBOUNDED",
-        GRB.TIME_LIMIT:      "TIME_LIMIT (no solution found)",
-    }
-    statusStr = statusMap.get(cciModel.Status, f"Status code {cciModel.Status}")
-    print(f"\n  [Q2] Model did not reach optimality: {statusStr}")

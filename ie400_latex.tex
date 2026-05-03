@@ -19,7 +19,10 @@
 
 \begin{center}
 {\Large\textbf{IE 400 -- Term Project Report}}\\[4pt]
-Spring 2026
+Spring 2026\\[8pt]
+\textbf{Berke \.{I}smail Erhan As{\i}l} \quad (22203732)\\[2pt]
+\textbf{Halis Vefa T\"{u}rky{\i}lmaz} \quad (22102898)\\[2pt]
+\textbf{Aziz \"{U}z\"{u}mc\"{u}} \quad (22102800)
 \end{center}
 
 \bigskip
@@ -31,8 +34,8 @@ Spring 2026
 
 Lara starts at cell $(1,1)$ and must reach the exit at cell $(8,8)$ on an $8\times8$ grid
 in the minimum number of time steps. At each time step she may move one cell up, down,
-left, or right, or stay in place. She cannot enter obstacle cells. Three security cameras
-patrol the museum; if Lara occupies any camera-visible cell at the same time step, she is
+left or right or stay in place. She cannot enter obstacle cells. Three security cameras
+patrol the museum; if Lara occupies any camera visible cell at the same time step, she is
 caught.
 
 \textbf{Obstacle cells:}
@@ -90,7 +93,7 @@ $4+$ & \multicolumn{3}{l}{repeats from $t=0$} \\
 \end{tabular}
 \end{center}
 
-The combined camera-visible set at time $t$ is
+The combined camera visible set at time $t$ is
 \[
   F(t) = C_1[t \bmod 4]\;\cup\; C_2[t \bmod 6]\;\cup\; C_3[t \bmod 4].
 \]
@@ -104,26 +107,27 @@ The combined camera-visible set at time $t$ is
   \item $N(r,c)$: set of cells reachable in one step from $(r,c)$, including $(r,c)$ itself
         and its orthogonal neighbours in $\mathcal{V}$
   \item $F(t)$: set of cells visible by any camera at time $t$
-  \item $T$: planning horizon (total number of steps); to be minimised
+  \item $T_{\max}=30$: maximum planning horizon (an upper bound on the number of steps)
 \end{itemize}
 
 \textbf{Decision Variables}
 \[
-  x_{t,r,c} \in \{0,1\} \qquad t=0,1,\ldots,T,\quad (r,c)\in\mathcal{V}
+  x_{t,r,c} \in \{0,1\} \qquad t=0,1,\ldots,T_{\max},\quad (r,c)\in\mathcal{V}
 \]
-$x_{t,r,c}=1$ if Lara occupies cell $(r,c)$ at time step $t$, and $0$ otherwise.
+$x_{t,r,c}=1$ if Lara occupies cell $(r,c)$ at time step $t$ and $0$ otherwise.
+\[
+  z_t \in \{0,1\} \qquad t=0,1,\ldots,T_{\max}
+\]
+$z_t=1$ if Lara reaches the exit $(8,8)$ for the \emph{first time} exactly at time $t$,
+and $0$ otherwise.
 
 \textbf{Objective Function}
 
-The IP is solved as a \textbf{feasibility problem} for a fixed horizon $T^*$ that is
-pre-computed by BFS over the time-expanded state space. The objective is therefore a
-constant zero:
+The model is now a \textbf{time minimizing} optimization problem. The objective minimizes
+the time of the first arrival at the exit:
 \[
-  \min\; 0
+  \min\;\sum_{t=0}^{T_{\max}} t\cdot z_t
 \]
-The model checks whether a feasible path of exactly $T^*$ steps exists; BFS guarantees
-that no shorter feasible path can exist, so the first $T^*$ for which the IP is feasible
-is optimal.
 
 \textbf{Constraints}
 
@@ -134,13 +138,13 @@ is optimal.
 
 \textbf{(C2) One cell per time step:}
 \[
-  \sum_{(r,c)\in\mathcal{V}} x_{t,r,c}=1 \qquad \forall\;t=0,1,\ldots,T
+  \sum_{(r,c)\in\mathcal{V}} x_{t,r,c}=1 \qquad \forall\;t=0,1,\ldots,T_{\max}
 \]
 
 \textbf{(C3) Valid movement:}
 \[
   x_{t+1,r,c}\;\leq\!\!\sum_{(r',c')\in N(r,c)}\!\! x_{t,r',c'}
-  \qquad \forall\;t=0,\ldots,T-1,\quad(r,c)\in\mathcal{V}
+  \qquad \forall\;t=0,\ldots,T_{\max}-1,\quad(r,c)\in\mathcal{V}
 \]
 
 \textbf{(C4) Camera avoidance:}
@@ -149,17 +153,32 @@ is optimal.
 \]
 The exit cell $(8,8)$ is exempt: Lara may step there even if a camera sees it.
 
-\textbf{(C5) Exit reached at horizon $T$:}
+\textbf{(C5) Exactly one first-arrival time:}
 \[
-  x_{T,8,8}=1
+  \sum_{t=0}^{T_{\max}} z_t = 1
 \]
 
-\textbf{(C6) Binary domain:} $x_{t,r,c}\in\{0,1\}$
+\textbf{(C6) Reaching the exit:}
+\[
+  x_{t,8,8}\;\geq\;z_t \qquad \forall\;t=0,1,\ldots,T_{\max}
+\]
+
+\textbf{(C7) Absorbing exit} (once Lara reaches the exit, she stays):
+\[
+  x_{t,8,8}\;\geq\;x_{t-1,8,8} \qquad \forall\;t=1,\ldots,T_{\max}
+\]
+
+\textbf{(C8) First-arrival detection:}
+\[
+  x_{t,8,8}-x_{t-1,8,8}\;\leq\;z_t \qquad \forall\;t=1,\ldots,T_{\max}
+\]
+
+\textbf{(C9) Binary domain:} $x_{t,r,c}\in\{0,1\}$, $z_t\in\{0,1\}$.
 
 %-----------------------------------------------------------------------
 \subsection*{Task 2: Base Case}
 
-BFS over the time-expanded state space finds $T^*=14$. The IP is solved at $T=14$ with
+BFS over the time expanded state space finds $T^*=14$. The IP is solved at $T=14$ with
 Gurobi and all constraints (C1)--(C6) are verified to hold.
 
 \medskip
@@ -197,7 +216,7 @@ visited $(5,1)$ at or before time $t$. The linearisation is:
   x_{t,8,3} &\;\leq\; 1-y_{t-1} && \forall\;t\geq1 \tag{block $(8,3)$ after trap}
 \end{align*}
 
-\textbf{Result:} $T^*=16$ steps. The base-case path visits $(5,1)$ at $t=4$, which would
+\textbf{Result:} $T^*=16$ steps. The base case path visits $(5,1)$ at $t=4$, which would
 then forbid $(8,3)$. The solver finds an alternative route avoiding $(8,3)$ at the cost of
 2 extra steps.
 
@@ -226,9 +245,9 @@ are forbidden before $t=18$:
   x_{t,r,c}=0 \qquad \forall\;t<18,\quad(r,c)\in\mathrm{LOCKED}.
 \]
 
-\textbf{Result:} $T^*=20$ steps. Lara waits at $(1,1)$ for the first four time steps, then
-follows a route through the interior, arriving at $(6,8)$ exactly at $t=18$ when the lock
-is lifted.
+\textbf{Result:} $T^*=20$ steps. Lara advances immediately and spends time waiting at
+interior cells such as $(4,4)$ and $(4,7)$ to time her arrival at $(6,8)$ exactly at
+$t=18$ when the lock is lifted.
 
 \begin{center}
 \begin{tabular}{cc|cc|cc}
@@ -255,78 +274,65 @@ $t$ & Cell & $t$ & Cell & $t$ & Cell \\
   x_{3,4,4}=1.
 \]
 
-\textbf{Result: Infeasible.} BFS on the obstacle map (ignoring cameras) shows that the
-minimum number of steps to reach $(4,4)$ from $(1,1)$ is~6. The Manhattan distance alone
-is $|4-1|+|4-1|=6$, and the obstacle cells $(4,2)$ and $(4,3)$ block shorter detours,
-making the actual minimum at least~6. Since the constraint requires arrival at $t=3<6$,
-it is geometrically impossible regardless of the chosen path. The model has no feasible
-solution.
-
-\textbf{Extended Result (Teleport Allowed):} If the movement constraint for the
-transition $t=2 \to t=3$ is relaxed (i.e.\ a ``ghost teleport'' is permitted),
-the model becomes feasible and yields $T^* = 14$ steps. Lara waits at $(1,1)$
-for two time steps, teleports to $(4,4)$ at $t=3$, then proceeds to the exit.
-
-\begin{center}
-\begin{tabular}{cc|cc|cc}
-\toprule
-$t$ & Cell & $t$ & Cell & $t$ & Cell \\
-\midrule
- 0 & $(1,1)$ &  5 & $(5,3)$ & 10 & $(8,5)$ \\
- 1 & $(2,1)$ &  6 & $(6,3)$ & 11 & $(8,5)$ \\
- 2 & $(1,1)$ &  7 & $(7,3)$ & 12 & $(8,6)$ \\
- 3 & $(4,4)$ \textit{[teleport]} &  8 & $(8,3)$ & 13 & $(8,7)$ \\
- 4 & $(5,4)$ &  9 & $(8,4)$ & 14 & $(8,8)$ \\
-\bottomrule
-\end{tabular}
-\end{center}
+\textbf{Result: Infeasible.} The Manhattan distance from the starting cell $(1,1)$ to the
+checkpoint $(4,4)$ is
+\[
+  |4-1|+|4-1|=6,
+\]
+so the earliest possible time at which Lara can occupy $(4,4)$ is $t=6$. The constraint
+$x_{3,4,4}=1$ requires arrival at $t=3<6$, which directly violates the movement
+constraint (C3): no sequence of unit step moves from $(1,1)$ can reach $(4,4)$ in three
+steps. The infeasibility is therefore geometric in nature and admits no workaround;
+relaxing the movement constraint would amount to changing the problem itself which is
+not permitted. The model is \textbf{INFEASIBLE}.
 %-----------------------------------------------------------------------
 \subsection*{Task 6: Branch and Bound (Base Case)}
 
-\textbf{Branching Strategy.}  
-If the LP relaxation gives a fractional solution, we branch on a fractional variable
-$x_{t,r,c}$ by creating two subproblems:
+\textbf{Branching Strategy.}
+If the LP relaxation at a node yields a fractional occupancy variable $x_{t,r,c}$, two
+child subproblems are generated by fixing $x_{t,r,c}=0$ and $x_{t,r,c}=1$ respectively.
+
+\textbf{Bounding Strategy.}
+At each node we solve the LP relaxation of the time minimizing model and obtain a lower
+bound $LB$ on the IP optimum. A node is \emph{fathomed by bound} whenever $LB\geq UB$,
+where $UB$ is the value of the best known integer feasible incumbent.
+
+\textbf{Root-Node Analysis.}
+Under the new objective $\min\sum_{t} t\cdot z_t$, the LP relaxation at the root node
+evaluates to
 \[
-x_{t,r,c} = 0 \quad \text{and} \quad x_{t,r,c} = 1.
+  LB = 14.0000.
 \]
-
-\textbf{Bounding Strategy.}  
-At each node, we solve the LP relaxation.  
-\begin{itemize}
-    \item If the solution is integer $\rightarrow$ it is feasible for the IP and becomes the incumbent.
-    \item If it cannot improve the current solution $\rightarrow$ the node is pruned.
-\end{itemize}
-
-\textbf{Result for This Problem.}  
-Since $T^* = 14$ is fixed by BFS, the IP becomes a feasibility problem. The LP relaxation
-at the root node yields a \emph{fractional} solution (e.g.\ $x_{2,2,1}=0.5$). The
-algorithm therefore branches, following a Depth-First Search (DFS) strategy. After
-exploring a total of \textbf{12 nodes}, an integer-feasible solution is found at
-\textbf{depth~11}.
+The base case integer solution from Task~2 supplies an incumbent with
+\[
+  UB = 14.
+\]
+Hence $LB = UB$ already at the root, the fathoming-by-bound condition is satisfied
+immediately, and no branching is required.
 
 \medskip
-\textbf{Search Tree (DFS, depth-first).}
+\textbf{Search Tree.}
 
 \begin{center}
 \begin{tikzpicture}[
-  every node/.style={draw, rounded corners, align=center, font=\small, inner sep=5pt},
-  level distance=14mm,
-  sibling distance=52mm
-]
-\node {Root (depth 0)\\ LP fractional\\ Branch on $x_{2,2,1}$}
-  child { node {$x_{2,2,1}=0$ (depth 1)\\ LP fractional\\ $\vdots$}
-    child { node {$\cdots$ (depth 11)\\ Integer solution\\ $\Rightarrow$ Optimal} }
-    child[missing] {}
+  every node/.style={
+    draw, rounded corners, align=center, font=\small,
+    inner sep=8pt, line width=0.6pt
   }
-  child { node {$x_{2,2,1}=1$ (depth 1)\\ (not reached)} };
+]
+\node {%
+  \textbf{Root Node}\\[2pt]
+  LP Lower Bound: $LB = 14.0000$\\
+  Incumbent Upper Bound: $UB = 14$\\[2pt]
+  \textit{Status: Fathomed by bound} ($LB = UB$)
+};
 \end{tikzpicture}
 \end{center}
 
-\textbf{Conclusion.}  
-The LP relaxation at the root node yielded a fractional solution. The algorithm utilized a
-Depth-First Search (DFS) strategy and explored a total of \textbf{12 nodes} before finding
-the optimal integer solution at \textbf{depth~11}. The resulting path is identical to the
-BFS and IP solutions: $T^*=14$ steps.
+\textbf{Conclusion.}
+The branch-and-bound procedure terminates after exploring a single node. The root is
+fathomed by bound with $LB=UB=14$, and the optimum $T^*=14$ steps is certified without
+any branching. \textbf{Total nodes explored: 1.}
 
 %=======================================================================
 \section*{\underline{Question 2: CCI Production Planning}}
@@ -335,8 +341,8 @@ BFS and IP solutions: $T^*=14$ steps.
 
 Coca-Cola \.{I}\c{c}ecek (CCI) plans production at two plants -- Ankara~(A) and
 Istanbul~(I) -- over $m=1,\ldots,6$ months. The objective is to minimize the total cost of
-inventory holding, cross-region transportation, workforce wages, hiring, layoffs, and
-bottling-mode switching, subject to demand, capacity, workforce, and cross-shipping
+inventory holding, cross-region transportation, workforce wages, hiring, layoffs and
+bottling mode switching, subject to demand, capacity, workforce and cross shipping
 constraints.
 
 \subsection*{Data}
@@ -382,25 +388,29 @@ Primary region & CE & W \\
 
 Policy parameters: $\alpha=0.25$, $\beta=0.10$, $\Delta=10$.
 
-\textbf{Note.} The PDF states that 60\% of demand is in 2\,L bottles and 40\% in 1\,L
-bottles. Since the problem adds ``\textit{you may split accordingly},'' we treat total
-demand as a single aggregate and let the optimizer choose the 1\,L/2\,L mix freely; this
-is already reflected in the bottling-rate constraint (D1).
+\textbf{Note.} As specified in the project prompt, the demand of every region in every
+month is split explicitly into $40\%$ for $1\,$L bottles and $60\%$ for $2\,$L bottles.
+Letting $\gamma_1=0.40$ and $\gamma_2=0.60$, the per-size demand is
+\[
+  d^{1}_{j,m}=\gamma_1\,d_{j,m},\qquad
+  d^{2}_{j,m}=\gamma_2\,d_{j,m},\qquad \forall\,j,m,
+\]
+and these split demands must be fulfilled separately by size in the model.
 
 \subsection*{Decision Variables}
 
-Indices: $i\in\{A,I\}$ plant, $j\in\{W,CE\}$ region, $m\in\{1,\ldots,6\}$ month.
-All production and inventory quantities in liters (L).
+Indices: $i\in\{A,I\}$ plant, $j\in\{W,CE\}$ region, $m\in\{1,\ldots,6\}$ month, and
+$k\in\{1\text{L},2\text{L}\}$ bottle size. All production, shipment, and inventory
+quantities are in liters (L).
 
 \begin{itemize}
-  \item $p^1_{i,m},\,p^2_{i,m}\geq0$ \quad volume of 1\,L / 2\,L bottles produced at plant $i$ in month $m$ (L)
-  \item $s_{i,j,m}\geq0$ \quad volume shipped from plant $i$ to region $j$ in month $m$ (L)
-  \item $I_{i,m}\geq0$ \quad end-of-month inventory at plant $i$ in month $m$ (L)
+  \item $p^{k}_{i,m}\geq0$ \quad volume of size-$k$ bottles produced at plant $i$ in month $m$
+  \item $s^{k}_{i,j,m}\geq0$ \quad volume of size-$k$ bottles shipped from plant $i$ to region $j$ in month $m$
+  \item $I^{k}_{i,m}\geq0$ \quad end-of-month inventory of size $k$ at plant $i$ in month $m$
   \item $w_{i,m}\in\mathbb{Z}_{\geq0}$ \quad packaging workforce at plant $i$ in month $m$
   \item $h_{i,m},\,l_{i,m}\in\mathbb{Z}_{\geq0}$ \quad employees hired / laid off
-  \item $\delta_{i,k,m}\in\{0,1\}$ \quad 1 if bottle size $k\in\{1\text{L},2\text{L}\}$
-        is produced at plant $i$ in month $m$
-  \item $z_{i,m}\in\{0,1\}$ \quad 1 if both bottle sizes produced at plant $i$ in month $m$
+  \item $\delta_{i,k,m}\in\{0,1\}$ \quad 1 if bottle size $k$ is produced at plant $i$ in month $m$
+  \item $z_{i,m}\in\{0,1\}$ \quad 1 if both bottle sizes are produced at plant $i$ in month $m$
 \end{itemize}
 
 \subsection*{Objective Function}
@@ -409,8 +419,8 @@ All production and inventory quantities in liters (L).
 \min\;Z = C_{\mathrm{inv}}+C_{\mathrm{tr}}+C_w+C_h+C_l+C_{\mathrm{sw}}
 \]
 \begin{align*}
-C_{\mathrm{inv}} &= 0.05\sum_{i}\sum_{m}I_{i,m} \\
-C_{\mathrm{tr}}  &= 0.10\!\!\!\sum_{\substack{i,j:\,j\neq\mathrm{primary}(i)}}\sum_{m}s_{i,j,m} \\
+C_{\mathrm{inv}} &= 0.05\sum_{i}\sum_{m}\sum_{k}I^{k}_{i,m} \\
+C_{\mathrm{tr}}  &= 0.10\!\!\!\sum_{\substack{i,j:\,j\neq\mathrm{primary}(i)}}\sum_{m}\sum_{k}s^{k}_{i,j,m} \\
 C_w  &= 1{,}200\sum_{i}\sum_{m}w_{i,m} \\
 C_h  &= 1{,}500\sum_{i}\sum_{m}h_{i,m} \\
 C_l  &= 2{,}000\sum_{i}\sum_{m}l_{i,m} \\
@@ -442,76 +452,50 @@ C_{\mathrm{sw}} &= 20{,}000\sum_{i}\sum_{m}z_{i,m}
   w_{i,m}-w_{i,m-1}\leq10, \qquad w_{i,m-1}-w_{i,m}\leq10 \qquad\forall\,i,m
 \]
 
-\textbf{(D5) Inventory balance} (initial inventories $=0$):
+\textbf{(D5) Inventory balance} (initial inventories $I^{k}_{i,0}=0$), per bottle size:
 \[
-  I_{i,m}=I_{i,m-1}+p^1_{i,m}+p^2_{i,m}-\sum_{j}s_{i,j,m} \qquad\forall\,i,m
+  I^{k}_{i,m}=I^{k}_{i,m-1}+p^{k}_{i,m}-\sum_{j}s^{k}_{i,j,m}
+  \qquad\forall\,i,m,k
 \]
 
-\textbf{(D6) Demand fulfillment} (no backlogging):
+\textbf{(D6) Demand fulfillment} (no backlogging), per bottle size:
 \[
-  \sum_{i}s_{i,j,m}\geq d_{j,m} \qquad\forall\,j,m
+  \sum_{i}s^{k}_{i,j,m}\;=\;\gamma_k\,d_{j,m}
+  \qquad\forall\,j,m,k,
+\]
+with $\gamma_1=0.40$ and $\gamma_2=0.60$.
+
+\textbf{(D7) Perishability} (inventory cannot be carried for more than one month;
+since $I^{k}_{i,0}=0$, this reduces to: end-of-month inventory cannot exceed the
+production of that same month):
+\[
+  I^{k}_{i,m}\;\leq\;p^{k}_{i,m} \qquad\forall\,i,m,k
 \]
 
-\textbf{(D7) Cross-shipping cap} ($\alpha=25\%$):
+\textbf{(D8) Cross-shipping cap} ($\alpha=25\%$):
 \[
-  s_{i,j,m}\leq\alpha\,d_{j,m} \qquad\forall\,i,m,\;j\neq\mathrm{primary}(i)
+  \sum_{k}s^{k}_{i,j,m}\;\leq\;\alpha\,d_{j,m}
+  \qquad\forall\,i,m,\;j\neq\mathrm{primary}(i)
 \]
 
-\textbf{(D8) Safety stock} ($\beta=10\%$, months $m=1,\ldots,5$):
+\textbf{(D9) Safety stock} ($\beta=10\%$, months $m=1,\ldots,5$):
 \[
-  I_{i,m}\geq\beta\,d_{j^*(i),\,m+1} \qquad m=1,\ldots,5 \quad\text{(quantities in L)}
+  \sum_{k}I^{k}_{i,m}\;\geq\;\beta\,d_{j^*(i),\,m+1}
+  \qquad m=1,\ldots,5,
 \]
 where $j^*(i)$ is the primary region of plant $i$.
 
-\textbf{(D9) Zero ending inventory:}
+\textbf{(D10) Zero ending inventory:}
 \[
-  I_{i,6}=0 \qquad\forall\,i
+  I^{k}_{i,6}=0 \qquad\forall\,i,k
 \]
 
-\textbf{(D10) Switching cost} (big-$M=50{,}000{,}000$ L):
+\textbf{(D11) Switching cost} (big-$M=50{,}000{,}000$ L):
 \[
   p^k_{i,m}\leq50{,}000{,}000\,\delta_{i,k,m} \qquad\forall\,i,k,m
 \]
 \[
   z_{i,m}\geq\delta_{i,1\mathrm{L},m}+\delta_{i,2\mathrm{L},m}-1 \qquad\forall\,i,m
 \]
-
-%-----------------------------------------------------------------------
-\subsection*{Results}
-
-The CCI model was solved to optimality with Gurobi. The optimal total minimum cost and its
-breakdown by component are as follows:
-
-\begin{center}
-\begin{tabular}{lr}
-\toprule
-Cost Component & Amount (TL) \\
-\midrule
-Wage cost              & $1{,}414{,}800.00$ \\
-Hiring cost            & $72{,}000.00$ \\
-Layoff cost            & $12{,}000.00$ \\
-Inventory holding      & $600{,}000.00$ \\
-Cross-region transport & $70{,}000.00$ \\
-Bottling switch cost   & $0.00$ \\
-\midrule
-\textbf{Total Minimum Cost} & $\mathbf{2{,}168{,}800.00}$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-Notable findings from the optimal plan:
-\begin{itemize}
-  \item No bottling-mode switching cost is incurred ($z_{i,m}=0$ for all $i,m$); each plant
-        uses at most one bottle size per month.
-  \item Cross-region shipping is minimal (700{,}000\,L from Istanbul to
-        Central~\&~Eastern in month~1 only), confirming that the 25\% cap is only
-        occasionally binding.
-  \item Workforce levels rise gradually from the initial 60 (Ankara) and 100
-        (Istanbul) employees, respecting the $\Delta=10$ smoothing constraint
-        throughout all six months.
-\end{itemize}
-
-Detailed monthly production, workforce, and inventory plans are generated by the Python
-script and verified to satisfy all demands and constraints.
 
 \end{document}
