@@ -261,6 +261,157 @@ task2_T, task2_path = solveMuseumIP("Task2_BaseCase", baseOptimalT)
 printPath("Task 2 – Base Case", task2_T, task2_path)
 validatePath("Task2", task2_path)
 
+#  Task 2 – Branch-and-Bound
+
+class BBNode:
+    __slots__ = ("fixings", "depth", "label")
+
+    def __init__(self, fixings, depth, label):
+        self.fixings = fixings   
+        self.depth   = depth
+        self.label   = label
+
+
+def _buildLPSubproblem(taskName, horizonT, fixings):
+    model = gp.Model(taskName)
+    model.setParam("OutputFlag", 0)
+    model.setParam("TimeLimit", 30)
+
+    occupancy = {
+        (t, r, c): model.addVar(
+            lb=0.0, ub=1.0,
+            vtype=GRB.CONTINUOUS,
+            name=f"occ_t{t}_r{r}_c{c}",
+        )
+        for t in range(horizonT + 1)
+        for (r, c) in VALID_CELLS
+    }
+
+    model.addConstr(occupancy[0, START_CELL[0], START_CELL[1]] == 1.0)
+    for (r, c) in VALID_CELLS:
+        if (r, c) != START_CELL:
+            model.addConstr(occupancy[0, r, c] == 0.0)
+
+    for t in range(horizonT + 1):
+        model.addConstr(
+            gp.quicksum(occupancy[t, r, c] for (r, c) in VALID_CELLS) == 1.0
+        )
+
+    for t in range(horizonT):
+        for (r, c) in VALID_CELLS:
+            nbrs = getNeighbours(r, c)
+            model.addConstr(
+                occupancy[t + 1, r, c]
+                <= gp.quicksum(occupancy[t, nr, nc] for (nr, nc) in nbrs)
+            )
+
+    for t in range(horizonT + 1):
+        for (r, c) in getCameraVisibleCells(t):
+            if (r, c) in VALID_CELLS and (r, c) != EXIT_CELL:
+                model.addConstr(occupancy[t, r, c] == 0.0)
+
+    model.addConstr(occupancy[horizonT, EXIT_CELL[0], EXIT_CELL[1]] == 1.0)
+
+    for (t, r, c), val in fixings.items():
+        model.addConstr(occupancy[t, r, c] == float(val))
+
+    model.setObjective(0, GRB.MINIMIZE)
+    return model, occupancy
+
+
+def _isFractional(val, tol=1e-6):
+    return tol < val < 1.0 - tol
+
+
+def _extractPath(horizonT, occupancy):
+    path = []
+    for t in range(horizonT + 1):
+        for (r, c) in sorted(VALID_CELLS):
+            if occupancy[t, r, c].X > 0.5:
+                path.append((t, r, c))
+                break
+    return path
+
+
+def solveMuseumBranchAndBound(horizonT):
+    print(f"  [B&B] Fixed horizon T = {horizonT}")
+
+    rootNode = BBNode(fixings={}, depth=0, label="Root")
+    stack = [rootNode]     
+    nodeCount = 0
+
+    while stack:
+        node = stack.pop()
+        nodeCount += 1
+        indent = "    " + "  " * node.depth   
+
+        model, occupancy = _buildLPSubproblem(
+            f"BB_node_{nodeCount}", horizonT, node.fixings
+        )
+        model.optimize()
+
+        lpFeasible = model.Status in (GRB.OPTIMAL, GRB.TIME_LIMIT) and model.SolCount > 0
+
+        if not lpFeasible:
+            print(f"{indent}[B&B] Node {node.label} (depth {node.depth}): "
+                  f"LP INFEASIBLE – pruned.")
+            continue
+
+        fractionalVar = None   
+        for t in range(horizonT + 1):
+            for (r, c) in sorted(VALID_CELLS):
+                val = occupancy[t, r, c].X
+                if _isFractional(val):
+                    fractionalVar = (t, r, c)
+                    break
+            if fractionalVar is not None:
+                break
+
+        if fractionalVar is None:
+            path = _extractPath(horizonT, occupancy)
+            if node.depth == 0:
+                print(f"{indent}[B&B] Root Node: Solved, integer solution found. "
+                      f"No branching required.")
+            else:
+                print(f"{indent}[B&B] Node {node.label} (depth {node.depth}): "
+                      f"Integer solution found. B&B terminates.")
+            print(f"  [B&B] Total nodes explored: {nodeCount}")
+            return horizonT, path
+
+        ft, fr, fc = fractionalVar
+        fracVal = occupancy[ft, fr, fc].X
+        print(f"{indent}[B&B] Node {node.label} (depth {node.depth}): "
+              f"LP feasible, fractional occ[t={ft},r={fr},c={fc}]={fracVal:.4f}. "
+              f"Branching ...")
+
+        fixings0 = dict(node.fixings)
+        fixings0[fractionalVar] = 0
+        child0 = BBNode(
+            fixings=fixings0,
+            depth=node.depth + 1,
+            label=f"{node.label}->occ[{ft},{fr},{fc}]=0",
+        )
+
+        fixings1 = dict(node.fixings)
+        fixings1[fractionalVar] = 1
+        child1 = BBNode(
+            fixings=fixings1,
+            depth=node.depth + 1,
+            label=f"{node.label}->occ[{ft},{fr},{fc}]=1",
+        )
+
+        stack.append(child1)
+        stack.append(child0)
+
+    print(f"  [B&B] Stack exhausted. Problem INFEASIBLE at T={horizonT}.")
+    print(f"  [B&B] Total nodes explored: {nodeCount}")
+    return None, None
+
+bb2_T, bb2_path = solveMuseumBranchAndBound(baseOptimalT)
+printPath("Task 2 – Base Case (Branch-and-Bound)", bb2_T, bb2_path)
+validatePath("Task2_BB", bb2_path)
+
+
 TRAP_CELL      = (5, 1)
 FORBIDDEN_CELL = (8, 3)
 
@@ -388,7 +539,6 @@ for taskLabel, result in [
 
 
 #  QUESTION 2 – CCI PRODUCTION PLANNING
-print()
 print()
 print("  QUESTION 2 – CCI PRODUCTION PLANNING")
 
@@ -617,3 +767,123 @@ cciModel.setObjective(
 )
 
 cciModel.optimize()
+#  Q2 – Results 
+
+if cciModel.Status == GRB.OPTIMAL:
+    print()
+    print("  " + "=" *60)
+    print("  CCI PRODUCTION PLANNING – OPTIMAL SOLUTION")
+    print("  " + "=" * 60)
+
+    def _v(expr):
+        return sum(c * v.X for v, c in zip(expr.getVars(),
+                                            [expr.getCoeff(i)
+                                             for i in range(expr.size())]))
+
+    totalCost        = cciModel.ObjVal
+    holdingVal       = sum(INVENTORY_COST_PER_LITER *
+                           (inventory_ankara[m].X + inventory_istanbul[m].X)
+                           for m in MONTHS)
+    transportVal     = sum(TRANSPORT_COST_PER_LITER *
+                           (supply_ankara_to_western[m].X +
+                            supply_istanbul_to_centEast[m].X)
+                           for m in MONTHS)
+    wageVal          = sum(WAGE_PER_WORKER *
+                           (workers_ankara[m].X + workers_istanbul[m].X)
+                           for m in MONTHS)
+    hiringVal        = sum(HIRING_COST *
+                           (hired_ankara[m].X + hired_istanbul[m].X)
+                           for m in MONTHS)
+    layoffVal        = sum(LAYOFF_COST *
+                           (laidOff_ankara[m].X + laidOff_istanbul[m].X)
+                           for m in MONTHS)
+    switchingVal     = sum(SWITCHING_COST *
+                           (switching_ankara[m].X + switching_istanbul[m].X)
+                           for m in MONTHS)
+
+    print()
+    print(f"  Total Minimum Cost      : {totalCost:>18,.2f} TL")
+    print(f"  ----------------------------------------")
+    print(f"    Wage cost             : {wageVal:>18,.2f} TL")
+    print(f"    Hiring cost           : {hiringVal:>18,.2f} TL")
+    print(f"    Layoff cost           : {layoffVal:>18,.2f} TL")
+    print(f"    Inventory holding     : {holdingVal:>18,.2f} TL")
+    print(f"    Cross-region transport: {transportVal:>18,.2f} TL")
+    print(f"    Bottling switch cost  : {switchingVal:>18,.2f} TL")
+
+    print()
+    print("  MONTHLY DETAIL")
+    print("  " + "-" * 60)
+
+    HDR = (f"  {'Month':>5}  "
+           f"{'Plant':<9}  "
+           f"{'Prod1L(L)':>13}  "
+           f"{'Prod2L(L)':>13}  "
+           f"{'Workers':>7}  "
+           f"{'Hired':>5}  "
+           f"{'LaidOff':>7}  "
+           f"{'Inventory(L)':>13}  "
+           f"{'XShip(L)':>12}")
+    print(HDR)
+    print("  " + "-" * 72)
+
+    for m in MONTHS:
+        p1a  = prod1L_ankara[m].X
+        p2a  = prod2L_ankara[m].X
+        wa   = round(workers_ankara[m].X)
+        ha   = round(hired_ankara[m].X)
+        la   = round(laidOff_ankara[m].X)
+        ia   = inventory_ankara[m].X
+        xsa  = supply_ankara_to_western[m].X
+
+        print(f"  {m:>5}  "
+              f"{'Ankara':<9}  "
+              f"{p1a:>13,.0f}  "
+              f"{p2a:>13,.0f}  "
+              f"{wa:>7}  "
+              f"{ha:>5}  "
+              f"{la:>7}  "
+              f"{ia:>13,.0f}  "
+              f"{xsa:>12,.0f}")
+
+        p1i  = prod1L_istanbul[m].X
+        p2i  = prod2L_istanbul[m].X
+        wi   = round(workers_istanbul[m].X)
+        hi   = round(hired_istanbul[m].X)
+        li   = round(laidOff_istanbul[m].X)
+        ii   = inventory_istanbul[m].X
+        xsi  = supply_istanbul_to_centEast[m].X
+
+        print(f"  {'':>5}  "
+              f"{'Istanbul':<9}  "
+              f"{p1i:>13,.0f}  "
+              f"{p2i:>13,.0f}  "
+              f"{wi:>7}  "
+              f"{hi:>5}  "
+              f"{li:>7}  "
+              f"{ii:>13,.0f}  "
+              f"{xsi:>12,.0f}")
+
+        wD   = demandWestern[m]
+        ceD  = demandCentEast[m]
+        wSup = supply_istanbul_to_western[m].X + supply_ankara_to_western[m].X
+        ceSup= supply_ankara_to_centEast[m].X  + supply_istanbul_to_centEast[m].X
+        print(f"  {'':>5}  "
+              f"  Western demand {wD/1e6:.1f}M L -> supplied {wSup/1e6:.3f}M L  |  "
+              f"CentEast demand {ceD/1e6:.1f}M L -> supplied {ceSup/1e6:.3f}M L")
+
+        if m < len(MONTHS):
+            print("  " + "  " + "-" * 68)
+
+    print("  " + "=" * 72)
+    print()
+
+else:
+    statusMap = {
+        GRB.INFEASIBLE:      "INFEASIBLE",
+        GRB.INF_OR_UNBD:     "INF_OR_UNBD",
+        GRB.UNBOUNDED:       "UNBOUNDED",
+        GRB.TIME_LIMIT:      "TIME_LIMIT (no solution found)",
+    }
+    statusStr = statusMap.get(cciModel.Status, f"Status code {cciModel.Status}")
+    print(f"\n  [Q2] Model did not reach optimality: {statusStr}")
