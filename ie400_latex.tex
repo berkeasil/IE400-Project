@@ -285,6 +285,33 @@ constraint (C3): no sequence of unit step moves from $(1,1)$ can reach $(4,4)$ i
 steps. The infeasibility is therefore geometric in nature and admits no workaround;
 relaxing the movement constraint would amount to changing the problem itself which is
 not permitted. The model is \textbf{INFEASIBLE}.
+
+\medskip
+\textbf{Extended Result (Teleport Allowed).}
+If the movement constraint (C3) is relaxed for the transition $t=2\to t=3$ only ---
+i.e.\ Lara is permitted a ``ghost teleport'' at that single step --- the checkpoint
+constraint $x_{3,4,4}=1$ becomes feasible. Formally, constraint (C3) is enforced for all
+$t \neq 2$; the adjacency requirement between $t=2$ and $t=3$ is dropped. The model is
+re-solved under this relaxation with the same objective and all remaining constraints
+intact.
+
+\textbf{Result: } $T^*=14$ steps. Lara waits at $(1,1)$ for two time steps, teleports to
+$(4,4)$ at $t=3$, then proceeds to the exit along a camera-free path.
+
+\begin{center}
+\begin{tabular}{cc|cc|cc}
+\toprule
+$t$ & Cell & $t$ & Cell & $t$ & Cell \\
+\midrule
+ 0 & $(1,1)$ &  5 & $(5,3)$ & 10 & $(8,5)$ \\
+ 1 & $(2,1)$ &  6 & $(6,3)$ & 11 & $(8,5)$ \\
+ 2 & $(1,1)$ &  7 & $(7,3)$ & 12 & $(8,6)$ \\
+ 3 & $(4,4)$ \textit{[teleport]} &  8 & $(8,3)$ & 13 & $(8,7)$ \\
+ 4 & $(5,4)$ &  9 & $(8,4)$ & 14 & $(8,8)$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
 %-----------------------------------------------------------------------
 \subsection*{Task 6: Branch and Bound (Base Case)}
 

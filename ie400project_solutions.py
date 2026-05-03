@@ -229,9 +229,10 @@ def printPath(label, optimalT, path):
         print(f"  {t:>3}   ({r},{c}){annotation}")
 
 
-def validatePath(label, path):
+def validatePath(label, path, relaxedTransitions=None):
     if path is None:
         return
+    relaxed = set(relaxedTransitions) if relaxedTransitions else set()
     allOk = True
     cellAt = {t: (r, c) for t, r, c in path}
     for t, r, c in path:
@@ -241,7 +242,7 @@ def validatePath(label, path):
         if (r, c) != EXIT_CELL and (r, c) in getCameraVisibleCells(t):
             print(f"  FAIL [{label}] t={t}: ({r},{c}) is camera visible!")
             allOk = False
-        if t > 0:
+        if t > 0 and (t - 1) not in relaxed:
             prevRow, prevCol = cellAt[t - 1]
             if abs(r - prevRow) + abs(c - prevCol) > 1:
                 print(f"  FAIL [{label}] illegal jump ({prevRow},{prevCol}) -> ({r},{c})")
@@ -424,10 +425,6 @@ def solveMuseumBranchAndBound(integerUB, incumbentPath, T_max=T_MAX):
     print(f"  [B&B] Total nodes explored: {nodeCount}")
     return None, None
 
-bb2_T, bb2_path = solveMuseumBranchAndBound(baseOptimalT, task2_path)
-printPath("Task 2 – Base Case (Branch-and-Bound)", bb2_T, bb2_path)
-validatePath("Task2_BB", bb2_path)
-
 
 TRAP_CELL      = (5, 1)
 FORBIDDEN_CELL = (8, 3)
@@ -502,15 +499,35 @@ task5_T, task5_path = solveMuseumIP(
 printPath("Task 5 - Ghost Checkpoint [(4,4) at t=3]", task5_T, task5_path)
 validatePath("Task5", task5_path)
 
+# Task 5 Extended – Teleport Allowed (relax movement constraint for t=2 -> t=3)
+print(f"\n  [Task 5 – Teleport] Ghost Checkpoint at {GHOST_CELL} at t={GHOST_TIME} "
+      f"with teleport allowed (movement constraint at t={GHOST_TIME - 1}->{GHOST_TIME} relaxed).")
+
+task5_teleport_T, task5_teleport_path = solveMuseumIP(
+    "Task5_GhostCheckpoint_Teleport",
+    addGhostCheckpointConstraints,
+    relaxedTransitions=[GHOST_TIME - 1],
+)
+
+printPath("Task 5 – Ghost Checkpoint (Teleport Allowed)", task5_teleport_T, task5_teleport_path)
+validatePath("Task5_Teleport", task5_teleport_path, relaxedTransitions=[GHOST_TIME - 1])
+
 print("  Q1 Summary")
 for taskLabel, result in [
-    ("Task 2 - Base Case",    task2_T),
-    ("Task 3 - Booby Trap",   task3_T),
-    ("Task 4 - Exit Lock",    task4_T),
-    ("Task 5 - Ghost",        task5_T),
+    ("Task 2 - Base Case",         task2_T),
+    ("Task 3 - Booby Trap",        task3_T),
+    ("Task 4 - Exit Lock",         task4_T),
+    ("Task 5 - Ghost (no tp)",     task5_T),
+    ("Task 5 - Ghost (teleport)",  task5_teleport_T),
 ]:
     resultStr = f"{result} steps" if result is not None else "INFEASIBLE"
-    print(f"  {taskLabel:<26} : {resultStr}")
+    print(f"  {taskLabel:<28} : {resultStr}")
+
+# ── Task 6 – Branch-and-Bound (base case) ───────────────────────────────────
+print("\n  Task 6 – Branch-and-Bound (Base Case)\n")
+bb6_T, bb6_path = solveMuseumBranchAndBound(task2_T, task2_path)
+printPath("Task 6 – Base Case (Branch-and-Bound)", bb6_T, bb6_path)
+validatePath("Task6_BB", bb6_path)
 
 
 #  QUESTION 2 – CCI PRODUCTION PLANNING
